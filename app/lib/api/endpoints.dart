@@ -10,10 +10,12 @@ import '../models/json.dart';
 import '../models/meal_plan.dart';
 import '../models/organize.dart';
 import '../models/recipe.dart';
+import '../models/share.dart';
 import '../models/shopping.dart';
 import '../models/sync.dart';
 import '../models/user.dart';
 import 'api_client.dart';
+import 'api_exception.dart';
 
 /// Typed wrappers for the endpoints in docs/API.md.
 extension LarderApi on ApiClient {
@@ -103,6 +105,21 @@ extension LarderApi on ApiClient {
   // ---- recipes ------------------------------------------------------------
   Future<Recipe> recipe(String idOrSlug) async => Recipe.fromJson(asJson(await get('/api/recipes/$idOrSlug')));
   Future<Recipe> duplicateRecipe(String id) async => Recipe.fromJson(asJson(await post('/api/recipes/$id/duplicate')));
+
+  /// The recipe's public share link, or null if it has none.
+  Future<RecipeShare?> recipeShare(String id) async {
+    try {
+      return RecipeShare.fromJson(asJson(await get('/api/recipes/$id/share')));
+    } on ApiException catch (e) {
+      if (e.isNotFound) return null;
+      rethrow;
+    }
+  }
+
+  /// Creates the public share link, or returns the existing one.
+  Future<RecipeShare> createRecipeShare(String id) async =>
+      RecipeShare.fromJson(asJson(await post('/api/recipes/$id/share')));
+  Future<void> deleteRecipeShare(String id) => delete('/api/recipes/$id/share');
   Future<Recipe> uploadRecipeImage(String id, Uint8List bytes, String filename) async => Recipe.fromJson(
     asJson(
       await multipart(

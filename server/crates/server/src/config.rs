@@ -12,6 +12,8 @@ pub struct Config {
     pub public_url: String,
     pub jwt_secret: Vec<u8>,
     pub allow_registration: bool,
+    /// Whether household members may create public share links for recipes.
+    pub public_sharing: bool,
     pub cors_origins: Vec<String>,
     pub max_upload_bytes: usize,
     pub oidc: Option<OidcConfig>,
@@ -93,6 +95,7 @@ impl Config {
             public_url,
             jwt_secret,
             allow_registration: env_bool("LARDER_ALLOW_REGISTRATION", false),
+            public_sharing: env_bool("LARDER_PUBLIC_SHARING", true),
             cors_origins: env("LARDER_CORS_ORIGINS")
                 .map(|s| s.split(',').map(|o| o.trim().to_string()).filter(|o| !o.is_empty()).collect())
                 .unwrap_or_default(),
@@ -112,6 +115,7 @@ impl Config {
             public_url: "http://localhost:8080".into(),
             jwt_secret: b"test-secret-test-secret-test-secret".to_vec(),
             allow_registration: false,
+            public_sharing: true,
             cors_origins: vec![],
             max_upload_bytes: 50 * 1024 * 1024,
             oidc: None,

@@ -6,9 +6,11 @@ import 'package:material_ui/material_ui.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../api/endpoints.dart';
 import '../../data/app_mode.dart';
 import '../../data/preferences.dart';
 import '../../data/providers.dart';
+import '../../data/sharing.dart';
 import '../../data/backend.dart';
 import '../../models/recipe.dart';
 import '../../util/scaling.dart';
@@ -261,6 +263,7 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
   }
 
   Widget _menu(BuildContext context, Recipe r, double servings) {
+    final shared = ref.watch(publicSharingProvider) && ref.watch(recipeShareProvider(r.id)).value != null;
     return PopupMenuButton<String>(
       tooltip: 'More',
       icon: const _CircleIcon(Icons.more_vert_rounded),
@@ -276,7 +279,14 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
             if (copy != null && context.mounted) context.go('/recipes/${copy.id}');
           case 'share':
             Uri? link;
-            if (ref.read(appModeProvider) == AppMode.connected) {
+            if (ref.read(publicSharingProvider)) {
+              // A public link anyone can open; sharing again reuses it.
+              final share = await runOnline(() => ref.read(apiClientProvider).createRecipeShare(r.id));
+              if (share == null) return;
+              ref.invalidate(recipeShareProvider(r.id));
+              link = Uri.tryParse(share.url);
+            } else if (ref.read(appModeProvider) == AppMode.connected) {
+              // The server does not allow public links: share the recipe's page for household members.
               final base = ref.read(apiClientProvider).baseUrl;
               link = recipeLink(base.isEmpty ? Uri.base.origin : base, r);
             }
@@ -286,6 +296,22 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
                 subject: r.name,
               ),
             );
+          case 'unshare':
+            if (await confirm(
+              context,
+              title: 'Turn off the public link?',
+              message:
+                  'People with the link will no longer be able to open "${r.name}". Sharing again makes a new link.',
+            )) {
+              final done = await runOnline(() async {
+                await ref.read(apiClientProvider).deleteRecipeShare(r.id);
+                return true;
+              });
+              if (done == true) {
+                ref.invalidate(recipeShareProvider(r.id));
+                showSnack('Public link turned off');
+              }
+            }
           case 'source':
             final uri = Uri.tryParse(r.sourceUrl ?? '');
             if (uri != null) await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -317,6 +343,11 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
           value: 'share',
           child: ListTile(leading: Icon(Icons.share_outlined), title: Text('Share')),
         ),
+        if (shared)
+          const PopupMenuItem(
+            value: 'unshare',
+            child: ListTile(leading: Icon(Icons.link_off_rounded), title: Text('Turn off public link')),
+          ),
         if (r.sourceUrl != null)
           const PopupMenuItem(
             value: 'source',

@@ -130,4 +130,47 @@ void main() {
     await api.updateProfile(displayName: 'Alice', email: ' a@b.c ');
     expect((server.requests.single.body as Map)['email'], 'a@b.c');
   });
+
+  test('recipe share links: missing is null, create and delete hit the share endpoint', () async {
+    final server = FakeServer();
+    var shared = false;
+    server.on(
+      'GET',
+      '/api/recipes/r1/share',
+      (r) => shared
+          ? json({'token': 'abc', 'url': 'https://larder.example/s/abc', 'created_at': '2026-11-09T12:00:00.000000Z'})
+          : json({'error': 'recipe is not shared', 'code': 'not_found'}, 404),
+    );
+    server.on('POST', '/api/recipes/r1/share', (r) {
+      shared = true;
+      return json({
+        'token': 'abc',
+        'url': 'https://larder.example/s/abc',
+        'created_at': '2026-11-09T12:00:00.000000Z',
+      }, 201);
+    });
+    server.on('DELETE', '/api/recipes/r1/share', (r) {
+      shared = false;
+      return json(null, 204);
+    });
+    final api = ApiClient(baseUrl: 'http://srv', httpClient: server.client, accessToken: 'a', refreshToken: 'r');
+
+    expect(await api.recipeShare('r1'), isNull);
+    final created = await api.createRecipeShare('r1');
+    expect(created.url, 'https://larder.example/s/abc');
+    expect(created.createdAt, DateTime.utc(2026, 11, 9, 12));
+    expect((await api.recipeShare('r1'))?.token, 'abc');
+    await api.deleteRecipeShare('r1');
+    expect(await api.recipeShare('r1'), isNull);
+  });
+
+  test('server config reports public sharing, off for older servers', () async {
+    final server = FakeServer();
+    var body = <String, dynamic>{'version': '0.1.3', 'public_sharing': true};
+    server.on('GET', '/api/config', (r) => json(body));
+    final api = ApiClient(baseUrl: 'http://srv', httpClient: server.client);
+    expect((await api.config()).publicSharing, isTrue);
+    body = {'version': '0.1.2'};
+    expect((await api.config()).publicSharing, isFalse);
+  });
 }
