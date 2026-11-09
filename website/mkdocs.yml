@@ -1,8 +1,8 @@
 site_name: Larder
 site_description: A recipe manager and cookbook for Android and the web, with or without a server.
-site_url: https://larrydewey.github.io/Recipe-rs/
-repo_url: https://github.com/larrydewey/Recipe-rs
-repo_name: larrydewey/Recipe-rs
+site_url: https://larrydewey.github.io/Larder/
+repo_url: https://github.com/larrydewey/Larder
+repo_name: larrydewey/Larder
 edit_uri: edit/master/website/docs/
 copyright: Larder is MIT licensed.
 
