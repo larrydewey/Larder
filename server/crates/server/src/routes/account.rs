@@ -19,6 +19,7 @@ pub async fn public_config(State(state): State<AppState>) -> AppResult<Json<Valu
         "version": env!("CARGO_PKG_VERSION"),
         "setup_required": users == 0,
         "registration_open": state.config.allow_registration,
+        "public_sharing": state.config.public_sharing,
         "oidc": {
             "enabled": state.config.oidc.is_some(),
             "name": state.config.oidc.as_ref().map(|o| o.display_name.clone()),

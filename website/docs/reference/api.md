@@ -52,6 +52,7 @@ Refresh tokens are opaque strings valid for 60 days and are rotated on every ref
   "version": "0.1.0",
   "setup_required": false,          // true when no users exist: first registration becomes admin
   "registration_open": false,       // true: anyone may register (creates their own household)
+  "public_sharing": true,           // members may create public share links (LARDER_PUBLIC_SHARING)
   "oidc": { "enabled": true, "name": "Authentik" },
   "llm_enabled": true,
   "database": "sqlite"              // or "postgres"
@@ -212,6 +213,14 @@ Image URLs are capability URLs (random image id) and do NOT require auth so they
 - `PUT /api/recipes/{id}` `RecipeInput` → `Recipe`
 - `DELETE /api/recipes/{id}` → `204`
 - `POST /api/recipes/{id}/duplicate` → `201 Recipe`
+- `GET /api/recipes/{id}/share` → `200 RecipeShare`, or `404` if the recipe has no public link
+- `POST /api/recipes/{id}/share` → `201 RecipeShare` (new) or `200 RecipeShare` (the existing link);
+  `403` when `public_sharing` is off
+- `DELETE /api/recipes/{id}/share` → `204`; the link stops working
+
+  `RecipeShare = { "token": "32 hex chars", "url": "<LARDER_PUBLIC_URL>/s/<token>", "created_at": "…" }`.
+  The public page `GET /s/{token}` (outside `/api`, no authentication) returns HTML: the recipe,
+  or `404` "Recipe not available".
 - `PUT /api/recipes/{id}/favorite` → `204`, `DELETE /api/recipes/{id}/favorite` → `204`
 - `PUT /api/recipes/{id}/image` multipart form field `file` (jpeg/png/webp/gif) → `Recipe`
 - `DELETE /api/recipes/{id}/image` → `Recipe`

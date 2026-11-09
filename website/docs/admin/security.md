@@ -56,6 +56,23 @@ EXIF and GPS location. Images over 80 megapixels are rejected to prevent memory 
 
 All other API responses are sent with `Cache-Control: no-store`.
 
+## Public share links
+
+Members can publish a recipe at `/s/<key>`, a page anyone with the link can open without an
+account (see [Public share links](../guide/recipes.md#public-share-links)). The key is 128 random
+bits, so links cannot be found by guessing, but anyone who has a link can open it and pass it on.
+
+- The page shows that one recipe and its photo, nothing else from the household, and no
+  account names.
+- Keys that are not 32 hex characters are rejected before the database is queried; unknown keys
+  get the same "Recipe not available" page as turned-off links.
+- Pages are sent with `Cache-Control: no-store` (a turned-off link stops at once),
+  `X-Robots-Tag: noindex, nofollow`, `Referrer-Policy: no-referrer` (the key is not leaked to the
+  recipe's source site) and a strict `Content-Security-Policy` that allows no scripts.
+- All recipe text is HTML-escaped. The source link is only made clickable for `http` and
+  `https` URLs.
+- Set `LARDER_PUBLIC_SHARING=false` to turn the feature off for the whole server.
+
 ## Households isolate data
 
 Every API query is scoped to the caller's household: one household cannot read or change

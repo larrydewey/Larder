@@ -2,6 +2,7 @@ pub mod account;
 pub mod oidc;
 pub mod planner;
 pub mod recipes;
+pub mod share;
 pub mod transfer;
 
 use axum::extract::DefaultBodyLimit;
@@ -38,6 +39,7 @@ pub fn router(state: AppState) -> Router {
         .route("/recipes/organize", post(recipes::organize))
         .route("/recipes/{id}", get(recipes::get).put(recipes::update).delete(recipes::delete))
         .route("/recipes/{id}/duplicate", post(recipes::duplicate))
+        .route("/recipes/{id}/share", get(share::get_share).post(share::create_share).delete(share::delete_share))
         .route("/recipes/{id}/favorite", put(recipes::favorite).delete(recipes::unfavorite))
         .route("/recipes/{id}/image", put(recipes::upload_image).post(recipes::upload_image).delete(recipes::delete_image))
         .route("/images/{id}", get(recipes::serve_image))
@@ -61,7 +63,10 @@ pub fn router(state: AppState) -> Router {
         .layer(DefaultBodyLimit::max(state.config.max_upload_bytes))
         .layer(SetResponseHeaderLayer::if_not_present(header::CACHE_CONTROL, HeaderValue::from_static("no-store")));
 
-    let mut app = Router::new().nest("/api", api).route("/healthz", get(|| async { (StatusCode::OK, "ok") }));
+    let mut app = Router::new()
+        .nest("/api", api)
+        .route("/healthz", get(|| async { (StatusCode::OK, "ok") }))
+        .route("/s/{token}", get(share::public_page));
 
     if let Some(web) = &state.config.web_dir {
         // Serve the Flutter web build; unknown paths fall back to index.html (SPA routing).

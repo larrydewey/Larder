@@ -88,12 +88,31 @@ On wide screens (960 px and more) ingredients and instructions sit side by side.
 | **⋮ → Add to meal plan** | Pick a date, a meal (Breakfast, Lunch, Dinner, Snack) and servings (prefilled with the servings currently shown), then **Add** |
 | **⋮ → Add to shopping list** | Pick a list or **New list…**, confirm the servings, and the ingredients are scaled and merged into the list |
 | **⋮ → Duplicate** | Creates "*Name* (copy)" with its own copy of the photo, and opens it. Needs a server connection in connected mode. |
-| **⋮ → Share** | Opens the system share sheet with the recipe's name and its link on your Larder server. People in your household open it signed in; others need an account. In standalone mode it shares the recipe itself as text. The source URL is never shared, because it is attribution and your copy may differ from the original. |
+| **⋮ → Share** | Creates a [public link](#public-share-links) to the recipe (or reuses the existing one) and opens the system share sheet with the recipe's name and that link. Anyone with the link can view the recipe without an account. In standalone mode it shares the recipe itself as text. The source URL is never shared, because it is attribution and your copy may differ from the original. |
+| **⋮ → Turn off public link** | Shown when the recipe has a public link. After confirmation the link stops working at once. Sharing again makes a new link. |
 | **⋮ → Open source** | Opens the source URL (only shown when there is one) |
 | **⋮ → Delete** | After confirmation ("will be removed for everyone in your household") the recipe and its photo are deleted |
 
 The **Cook** button (bottom right) opens [cook mode](cook-mode.md) at the servings currently
 shown.
+
+### Public share links
+
+**Share** publishes the recipe at a link like `https://recipes.example.com/s/3f9c…`. Anyone who
+has the link sees a read-only page with the photo, ingredients, instructions, notes and an
+"Adapted from …" credit, without signing in and without seeing anything else from your Larder.
+Message apps show the title and photo as a preview.
+
+- The page always shows the current recipe, so later edits appear for everyone with the link.
+- Sharing the same recipe again sends the same link. Each recipe has at most one link.
+- **⋮ → Turn off public link** stops the link at once; deleting the recipe also removes it.
+- Links do not expire. The 32-character key in the link cannot be guessed, but anyone you send
+  it to can pass it on.
+- Search engines are asked not to index the pages.
+
+Public links need a server connection. If the server admin turned them off
+(`LARDER_PUBLIC_SHARING=false`), **Share** sends the recipe's link inside Larder instead, which
+only members of your household can open.
 
 <div class="grid-shots phone" markdown>
 

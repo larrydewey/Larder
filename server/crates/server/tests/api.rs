@@ -16,11 +16,24 @@ struct TestApp {
 
 impl TestApp {
     async fn new(db_url: Option<String>) -> Self {
+        Self::with_config(db_url, |_| {}).await
+    }
+
+    async fn with_config(db_url: Option<String>, adjust: impl FnOnce(&mut Config)) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let url = db_url.unwrap_or_else(|| format!("sqlite://{}", dir.path().join("test.db").display()));
-        let config = Config::for_tests(dir.path().to_path_buf(), url);
+        let mut config = Config::for_tests(dir.path().to_path_buf(), url);
+        adjust(&mut config);
         let state = larder_server::build_state(config).await.expect("state");
         Self { app: larder_server::app(state), _dir: dir }
+    }
+
+    /// GET without authentication, returning status, headers and the body as text.
+    async fn page(&self, path: &str) -> (StatusCode, axum::http::HeaderMap, String) {
+        let resp = self.app.clone().oneshot(Request::builder().uri(path).body(Body::empty()).unwrap()).await.unwrap();
+        let (status, headers) = (resp.status(), resp.headers().clone());
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        (status, headers, String::from_utf8_lossy(&bytes).into_owned())
     }
 
     async fn req(&self, method: &str, path: &str, token: Option<&str>, body: Option<Value>) -> (StatusCode, Value) {
@@ -393,6 +406,114 @@ fn urlencode(s: &str) -> String {
 /// Hook for import/export tests (kept separate so the core scenario stays readable).
 async fn extra_scenarios(t: &TestApp, tok: &str) {
     transfer::run(t, tok).await;
+    sharing::run(t, tok).await;
+}
+
+mod sharing {
+    use super::*;
+
+    pub async fn run(t: &TestApp, tok: &str) {
+        let (_, cfg) = t.req("GET", "/api/config", None, None).await;
+        assert_eq!(cfg["public_sharing"], true);
+
+        let (s, r) = t
+            .req(
+                "POST",
+                "/api/recipes",
+                Some(tok),
+                Some(json!({
+                    "name": "Tom's <Soup> & \"Bread\"",
+                    "description": "Rich and <i>warm</i>.",
+                    "source_url": "javascript:alert(1)",
+                    "source_name": "Aunt <May>",
+                    "prep_time_minutes": 15,
+                    "total_time_minutes": 90,
+                    "yield_quantity": 4,
+                    "yield_unit": "servings",
+                    "notes": "Keeps a week.",
+                    "ingredients": [
+                        {"original": "2 lb tomatoes", "section": "Soup"},
+                        {"original": "1 loaf <bread>", "section": "Toast"}
+                    ],
+                    "instructions": [{"text": "Simmer the tomatoes."}, {"text": "Toast the bread."}]
+                })),
+            )
+            .await;
+        assert_eq!(s, StatusCode::CREATED, "{r}");
+        let rid = r["id"].as_str().unwrap().to_string();
+        let share_path = format!("/api/recipes/{rid}/share");
+
+        // not shared yet; sharing needs a signed-in member
+        let (s, _) = t.req("GET", &share_path, Some(tok), None).await;
+        assert_eq!(s, StatusCode::NOT_FOUND);
+        let (s, _) = t.req("POST", &share_path, None, None).await;
+        assert_eq!(s, StatusCode::UNAUTHORIZED);
+
+        // create, then sharing again returns the same link
+        let (s, sh) = t.req("POST", &share_path, Some(tok), None).await;
+        assert_eq!(s, StatusCode::CREATED, "{sh}");
+        let token = sh["token"].as_str().unwrap().to_string();
+        assert_eq!(token.len(), 32);
+        assert!(token.bytes().all(|b| b.is_ascii_hexdigit()));
+        assert_eq!(sh["url"], format!("http://localhost:8080/s/{token}"));
+        let (s, again) = t.req("POST", &share_path, Some(tok), None).await;
+        assert_eq!(s, StatusCode::OK);
+        assert_eq!(again["token"], token.as_str());
+        let (s, got) = t.req("GET", &share_path, Some(tok), None).await;
+        assert_eq!(s, StatusCode::OK);
+        assert_eq!(got["url"], sh["url"]);
+
+        // the public page needs no account, escapes everything and is not indexed or cached
+        let (s, h, html) = t.page(&format!("/s/{token}")).await;
+        assert_eq!(s, StatusCode::OK);
+        assert_eq!(h["content-type"], "text/html; charset=utf-8");
+        assert_eq!(h["x-robots-tag"], "noindex, nofollow");
+        assert_eq!(h["cache-control"], "no-store");
+        assert_eq!(h["referrer-policy"], "no-referrer");
+        assert!(h["content-security-policy"].to_str().unwrap().contains("default-src 'none'"));
+        assert!(html.contains("<h1>Tom&#39;s &lt;Soup&gt; &amp; &quot;Bread&quot;</h1>"), "{html}");
+        assert!(html.contains("Rich and &lt;i&gt;warm&lt;/i&gt;."));
+        assert!(html.contains("<h3>Soup</h3>") && html.contains("<h3>Toast</h3>"));
+        assert!(html.contains("<li>1 loaf &lt;bread&gt;</li>"));
+        assert!(html.contains("<li>Simmer the tomatoes.</li>"));
+        assert!(html.contains("1 h 30 min") && html.contains("4 servings"));
+        assert!(html.contains("Adapted from Aunt &lt;May&gt;"));
+        assert!(!html.contains("javascript:"), "unsafe source links are not linked");
+        assert!(!html.contains("<i>") && !html.contains("<Soup>"));
+
+        // edits show up on the page
+        let mut edited = r.clone();
+        edited["name"] = json!("Tomato Soup");
+        edited["source_url"] = json!("https://example.com/soup");
+        let (s, _) = t.req("PUT", &format!("/api/recipes/{rid}"), Some(tok), Some(edited)).await;
+        assert_eq!(s, StatusCode::OK);
+        let (_, _, html) = t.page(&format!("/s/{token}")).await;
+        assert!(html.contains("<h1>Tomato Soup</h1>"));
+        assert!(html.contains(r#"<a href="https://example.com/soup" rel="nofollow noopener noreferrer">Aunt &lt;May&gt;</a>"#), "{html}");
+
+        // unknown and malformed tokens
+        for bad in ["/s/0123456789abcdef0123456789abcdef", "/s/nope", "/s/..%2F..%2Fetc%2Fpasswd"] {
+            let (s, _, html) = t.page(bad).await;
+            assert_eq!(s, StatusCode::NOT_FOUND, "{bad}");
+            assert!(html.contains("Recipe not available"));
+        }
+
+        // turning the link off stops it at once; sharing again makes a new link
+        let (s, _) = t.req("DELETE", &share_path, Some(tok), None).await;
+        assert_eq!(s, StatusCode::NO_CONTENT);
+        let (s, _, _) = t.page(&format!("/s/{token}")).await;
+        assert_eq!(s, StatusCode::NOT_FOUND);
+        let (s, sh2) = t.req("POST", &share_path, Some(tok), None).await;
+        assert_eq!(s, StatusCode::CREATED);
+        let token2 = sh2["token"].as_str().unwrap().to_string();
+        assert_ne!(token2, token);
+
+        // deleting the recipe removes its link
+        let (s, _) = t.req("DELETE", &format!("/api/recipes/{rid}"), Some(tok), None).await;
+        assert_eq!(s, StatusCode::NO_CONTENT);
+        let (s, _, _) = t.page(&format!("/s/{token2}")).await;
+        assert_eq!(s, StatusCode::NOT_FOUND);
+    }
 }
 
 mod transfer {
@@ -603,4 +724,35 @@ async fn organize_normalizes_and_categorizes() {
     assert_eq!(again["recipes_changed"], 0);
     let (_, all) = t.req("POST", "/api/recipes/organize", Some(&tok), Some(json!({"categorize": "all", "dry_run": true}))).await;
     assert_eq!(all["changes"][0]["category_after"], "Desserts");
+}
+
+#[tokio::test]
+async fn share_links_stay_within_the_household() {
+    let t = TestApp::with_config(None, |c| c.allow_registration = true).await;
+    let (_, a) = t.req("POST", "/api/auth/register", None, Some(json!({"username": "ann", "password": "password123"}))).await;
+    let (_, b) = t.req("POST", "/api/auth/register", None, Some(json!({"username": "ben", "password": "password123"}))).await;
+    let (ann, ben) = (a["access_token"].as_str().unwrap(), b["access_token"].as_str().unwrap());
+    let (_, r) = t.req("POST", "/api/recipes", Some(ann), Some(json!({"name": "Plum Cake"}))).await;
+    let path = format!("/api/recipes/{}/share", r["id"].as_str().unwrap());
+    let (s, sh) = t.req("POST", &path, Some(ann), None).await;
+    assert_eq!(s, StatusCode::CREATED);
+    // another household can neither see, create nor remove the link
+    for method in ["GET", "POST", "DELETE"] {
+        let (s, _) = t.req(method, &path, Some(ben), None).await;
+        assert_eq!(s, StatusCode::NOT_FOUND, "{method}");
+    }
+    let (s, _, _) = t.page(&format!("/s/{}", sh["token"].as_str().unwrap())).await;
+    assert_eq!(s, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn public_sharing_can_be_turned_off() {
+    let t = TestApp::with_config(None, |c| c.public_sharing = false).await;
+    let (_, cfg) = t.req("GET", "/api/config", None, None).await;
+    assert_eq!(cfg["public_sharing"], false);
+    let (_, a) = t.req("POST", "/api/auth/register", None, Some(json!({"username": "ann", "password": "password123"}))).await;
+    let tok = a["access_token"].as_str().unwrap();
+    let (_, r) = t.req("POST", "/api/recipes", Some(tok), Some(json!({"name": "Plum Cake"}))).await;
+    let (s, e) = t.req("POST", &format!("/api/recipes/{}/share", r["id"].as_str().unwrap()), Some(tok), None).await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "{e}");
 }

@@ -93,6 +93,7 @@ class ServerConfig {
     this.oidcEnabled = false,
     this.oidcName = '',
     this.llmEnabled = false,
+    this.publicSharing = false,
     this.database = '',
   });
 
@@ -102,6 +103,9 @@ class ServerConfig {
   final bool oidcEnabled;
   final String oidcName;
   final bool llmEnabled;
+
+  /// Whether this server lets members publish recipes at public share links.
+  final bool publicSharing;
   final String database;
 
   factory ServerConfig.fromJson(Json j) {
@@ -113,6 +117,7 @@ class ServerConfig {
       oidcEnabled: asBool(oidc['enabled']),
       oidcName: asStr(oidc['name'], 'SSO'),
       llmEnabled: asBool(j['llm_enabled']),
+      publicSharing: asBool(j['public_sharing']),
       database: asStr(j['database']),
     );
   }
@@ -123,6 +128,7 @@ class ServerConfig {
     'registration_open': registrationOpen,
     'oidc': {'enabled': oidcEnabled, 'name': oidcName},
     'llm_enabled': llmEnabled,
+    'public_sharing': publicSharing,
     'database': database,
   };
 }
