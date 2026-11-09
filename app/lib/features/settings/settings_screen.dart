@@ -201,6 +201,18 @@ class SettingsScreen extends ConsumerWidget {
                           trailing: const Icon(Icons.chevron_right_rounded),
                           onTap: () => context.go('/settings/admin'),
                         ),
+                      if (user?.isAdmin ?? false)
+                        ListTile(
+                          leading: const Icon(Icons.auto_awesome_outlined),
+                          title: const Text('AI assistant'),
+                          subtitle: Text(
+                            ref.watch(authProvider).config?.llmEnabled ?? false
+                                ? 'On · reads recipe photos for everyone'
+                                : 'Off · add an API key to read recipe photos',
+                          ),
+                          trailing: const Icon(Icons.chevron_right_rounded),
+                          onTap: () => context.go('/settings/ai'),
+                        ),
                     ],
                   ),
                 ],

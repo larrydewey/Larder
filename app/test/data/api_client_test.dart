@@ -173,4 +173,47 @@ void main() {
     body = {'version': '0.1.2'};
     expect((await api.config()).publicSharing, isFalse);
   });
+
+  test('AI settings: parse status, send only filled-in fields, never a blank key', () async {
+    final server = FakeServer();
+    final bodies = <Map>[];
+    final status = {
+      'source': 'server',
+      'enabled': true,
+      'provider': 'anthropic',
+      'model': 'claude-sonnet-5-5',
+      'base_url': 'https://api.anthropic.com',
+      'has_key': true,
+      'key_hint': 'WXYZ',
+      'key_unreadable': false,
+      'defaults': {
+        'anthropic': {'model': 'claude-opus-5-5', 'base_url': 'https://api.anthropic.com', 'needs_key': true},
+        'ollama': {'model': 'llama3.2-vision', 'base_url': 'http://localhost:11434/v1', 'needs_key': false},
+      },
+    };
+    server.on('GET', '/api/admin/settings/ai', (r) => json(status));
+    server.on('PUT', '/api/admin/settings/ai', (r) {
+      bodies.add(r.body as Map);
+      return json(status);
+    });
+    server.on(
+      'POST',
+      '/api/admin/settings/ai/test',
+      (r) => json({'ok': true, 'model': 'Anthropic (claude-sonnet-5-5)'}),
+    );
+    final api = ApiClient(baseUrl: 'http://srv', httpClient: server.client, accessToken: 'a', refreshToken: 'r');
+
+    final s = await api.aiSettings();
+    expect(s.enabled, isTrue);
+    expect(s.fromEnvironment, isFalse);
+    expect(s.keyHint, 'WXYZ');
+    expect(s.defaults['ollama']!.needsKey, isFalse);
+    expect(s.defaults['anthropic']!.model, 'claude-opus-5-5');
+
+    await api.saveAiSettings(provider: 'anthropic', apiKey: '   ', model: '', baseUrl: '  ');
+    await api.saveAiSettings(provider: 'anthropic', apiKey: ' sk-ant-new-key ', model: 'claude-sonnet-5-5');
+    expect(bodies[0], {'provider': 'anthropic'});
+    expect(bodies[1], {'provider': 'anthropic', 'api_key': 'sk-ant-new-key', 'model': 'claude-sonnet-5-5'});
+    expect(await api.testAiSettings(), 'Anthropic (claude-sonnet-5-5)');
+  });
 }

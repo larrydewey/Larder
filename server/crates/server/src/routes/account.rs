@@ -24,7 +24,7 @@ pub async fn public_config(State(state): State<AppState>) -> AppResult<Json<Valu
             "enabled": state.config.oidc.is_some(),
             "name": state.config.oidc.as_ref().map(|o| o.display_name.clone()),
         },
-        "llm_enabled": state.llm.is_some(),
+        "llm_enabled": state.ai.client().is_some(),
         "database": state.db.kind.as_str(),
     })))
 }

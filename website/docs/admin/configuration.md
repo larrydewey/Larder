@@ -38,7 +38,9 @@ OIDC is enabled when **both** `LARDER_OIDC_ISSUER` and `LARDER_OIDC_CLIENT_ID` a
 
 ## AI assist
 
-See [AI assist](../guide/ai.md).
+See [AI assist](../guide/ai.md). Admins can also set the provider and key in the app (**Settings → Household → AI
+assistant**) without these variables; when `LARDER_LLM_PROVIDER` is set, the variables win and the app
+shows them read-only.
 
 | Variable | Default | Example | Description |
 |---|---|---|---|

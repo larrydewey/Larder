@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
+import '../models/ai_settings.dart';
 import '../models/cookbook.dart';
 import '../models/household.dart';
 import '../models/import_job.dart';
@@ -101,6 +102,27 @@ extension LarderApi on ApiClient {
   Future<User> adminUpdateUser(String id, Json body) async =>
       User.fromJson(asJson(await patch('/api/admin/users/$id', body)));
   Future<void> adminDeleteUser(String id) => delete('/api/admin/users/$id');
+
+  // --- server settings (admins) ---
+  Future<AiSettings> aiSettings() async => AiSettings.fromJson(asJson(await get('/api/admin/settings/ai')));
+
+  /// Saves the AI assistant settings. Leave [apiKey] null to keep the saved key (the server
+  /// only keeps it for the same provider and address).
+  Future<AiSettings> saveAiSettings({required String provider, String? apiKey, String? model, String? baseUrl}) async =>
+      AiSettings.fromJson(
+        asJson(
+          await put('/api/admin/settings/ai', {
+            'provider': provider,
+            if (apiKey != null && apiKey.trim().isNotEmpty) 'api_key': apiKey.trim(),
+            if (model != null && model.trim().isNotEmpty) 'model': model.trim(),
+            if (baseUrl != null && baseUrl.trim().isNotEmpty) 'base_url': baseUrl.trim(),
+          }),
+        ),
+      );
+  Future<void> deleteAiSettings() => delete('/api/admin/settings/ai');
+
+  /// Sends one small request with the saved settings; returns the model description.
+  Future<String> testAiSettings() async => asStr(asJson(await post('/api/admin/settings/ai/test'))['model']);
 
   // ---- recipes ------------------------------------------------------------
   Future<Recipe> recipe(String idOrSlug) async => Recipe.fromJson(asJson(await get('/api/recipes/$idOrSlug')));
