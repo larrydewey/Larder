@@ -2,10 +2,11 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use crate::ai::Ai;
 use crate::config::Config;
 use crate::db::Db;
 use crate::images::ImageStore;
-use larder_assist::Llm;
+use crate::secrets::SecretBox;
 
 pub type AppState = Arc<Inner>;
 
@@ -16,7 +17,10 @@ pub struct Inner {
     pub http: reqwest::Client,
     /// Client for user-supplied URLs (imports); refuses local addresses.
     pub fetch: reqwest::Client,
-    pub llm: Option<Llm>,
+    /// The AI assistant, from environment variables or admin settings (changeable at runtime).
+    pub ai: Ai,
+    /// Encrypts secrets stored in the database.
+    pub secrets: SecretBox,
     /// Pending OIDC logins keyed by `state`.
     pub oidc_pending: Mutex<HashMap<String, OidcPending>>,
     /// Cached OIDC discovery document.
@@ -42,14 +46,16 @@ impl Inner {
             .build()?;
         let fetch = crate::netguard::guarded_client(larder_import::USER_AGENT)?;
         let images = ImageStore::new(config.data_dir.join("images"))?;
-        let llm = config.llm.clone().map(|c| Llm::new(c, http.clone()));
+        let ai = Ai::new(config.llm.as_ref(), &http);
+        let secrets = SecretBox::new(&config.jwt_secret);
         Ok(Arc::new(Self {
             config,
             db,
             images,
             http,
             fetch,
-            llm,
+            ai,
+            secrets,
             oidc_pending: Mutex::new(HashMap::new()),
             oidc_discovery: tokio::sync::Mutex::new(None),
         }))

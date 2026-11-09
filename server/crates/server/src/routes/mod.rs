@@ -2,6 +2,7 @@ pub mod account;
 pub mod oidc;
 pub mod planner;
 pub mod recipes;
+pub mod settings;
 pub mod share;
 pub mod transfer;
 
@@ -35,6 +36,8 @@ pub fn router(state: AppState) -> Router {
         .route("/household/members/{id}", patch(account::update_member).delete(account::remove_member))
         .route("/admin/users", get(account::admin_list_users))
         .route("/admin/users/{id}", patch(account::admin_update_user).delete(account::admin_delete_user))
+        .route("/admin/settings/ai", get(settings::get_ai).put(settings::put_ai).delete(settings::delete_ai))
+        .route("/admin/settings/ai/test", post(settings::test_ai))
         .route("/recipes", get(recipes::list).post(recipes::create))
         .route("/recipes/organize", post(recipes::organize))
         .route("/recipes/{id}", get(recipes::get).put(recipes::update).delete(recipes::delete))

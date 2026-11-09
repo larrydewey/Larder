@@ -32,6 +32,7 @@ jsonwebtoken = "9"
 rand = "0.8"
 sha2 = "0.10"
 hex = "0.4"
+ring = "0.17"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "any", "sqlite", "postgres", "migrate", "macros"] }
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = ["fs", "cors", "trace", "compression-gzip", "limit", "set-header"] }

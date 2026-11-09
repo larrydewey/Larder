@@ -145,6 +145,18 @@ Invite = { "code": "8-char code", "created_at": "...", "expires_at": "...", "cre
 - `GET /api/admin/users` → `[User & { "disabled": bool }]`
 - `PATCH /api/admin/users/{id}` `{ "is_admin"?: bool, "disabled"?: bool, "new_password"?: string }` → `User`
 - `DELETE /api/admin/users/{id}` → `204`
+- `GET /api/admin/settings/ai` → `AiSettings`
+- `PUT /api/admin/settings/ai` `{ "provider": "anthropic"|"openai"|"ollama", "api_key"?: string, "model"?: string, "base_url"?: string }` → `AiSettings`.
+  Applies immediately. Omit `api_key` to keep the saved key; it is only kept for the same provider and
+  base URL. `400` for invalid values or a missing key, `409` when `LARDER_LLM_*` environment variables
+  configure the assistant.
+- `DELETE /api/admin/settings/ai` → `204` (turns AI assist off; `409` with environment variables)
+- `POST /api/admin/settings/ai/test` → `{ "ok": true, "model": "…" }` after one small request, or `422`
+  with the provider's error
+
+  `AiSettings = { "source": "environment"|"server"|"off", "enabled": bool, "provider", "model", "base_url",
+  "has_key": bool, "key_hint": "last 4 characters" | null, "key_unreadable": bool,
+  "defaults": { "<provider>": { "model", "base_url", "needs_key" } } }`. The key itself is never returned.
 
 ## Recipes
 

@@ -165,7 +165,7 @@ async fn import_text(State(state): State<AppState>, user: AuthUser, Json(req): J
         return Err(AppError::bad_request("text is too long"));
     }
     let data: RecipeData = if req.use_llm {
-        let llm = state.llm.as_ref().ok_or_else(AppError::llm_disabled)?;
+        let llm = state.ai.client().ok_or_else(AppError::llm_disabled)?;
         llm.recipe_from_text(&req.text).await.map_err(|e| AppError::unprocessable(format!("{e:#}")))?
     } else {
         let mut d = larder_import::text::parse_plain_text(&req.text);
@@ -180,7 +180,7 @@ async fn import_text(State(state): State<AppState>, user: AuthUser, Json(req): J
 }
 
 async fn import_image(State(state): State<AppState>, user: AuthUser, mp: Multipart) -> AppResult<Response> {
-    let llm = state.llm.as_ref().ok_or_else(AppError::llm_disabled)?;
+    let llm = state.ai.client().ok_or_else(AppError::llm_disabled)?;
     let (bytes, _, fields) = read_upload(mp, "file").await?;
     let save = fields.iter().any(|(k, v)| k == "save" && v == "true");
     // Normalise to a reasonably sized JPEG for the model.

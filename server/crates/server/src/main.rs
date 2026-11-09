@@ -28,7 +28,7 @@ async fn main() -> anyhow::Result<()> {
         data_dir = %state.config.data_dir.display(),
         web = state.config.web_dir.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "disabled".into()),
         oidc = state.config.oidc.is_some(),
-        llm = state.llm.as_ref().map(|l| l.describe()).unwrap_or_else(|| "disabled".into()),
+        llm = state.ai.client().map(|l| l.describe()).unwrap_or_else(|| "disabled".into()),
         "starting Larder"
     );
     let app = larder_server::app(state);

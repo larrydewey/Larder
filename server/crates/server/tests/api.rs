@@ -756,3 +756,152 @@ async fn public_sharing_can_be_turned_off() {
     let (s, e) = t.req("POST", &format!("/api/recipes/{}/share", r["id"].as_str().unwrap()), Some(tok), None).await;
     assert_eq!(s, StatusCode::FORBIDDEN, "{e}");
 }
+
+/// A stand-in for the Anthropic Messages API that accepts one key.
+async fn mock_anthropic(good_key: &'static str) -> String {
+    use axum::http::HeaderMap;
+    use axum::routing::post;
+    let app = axum::Router::new().route(
+        "/v1/messages",
+        post(move |headers: HeaderMap| async move {
+            if headers.get("x-api-key").and_then(|v| v.to_str().ok()) != Some(good_key) {
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    axum::Json(json!({"type": "error", "error": {"type": "authentication_error", "message": "invalid x-api-key"}})),
+                );
+            }
+            let text = json!({"ingredients": [{"quantity": 2, "unit": "cup", "food": "flour"}]}).to_string();
+            (StatusCode::OK, axum::Json(json!({"content": [{"type": "text", "text": text}], "stop_reason": "end_turn"})))
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    format!("http://{addr}")
+}
+
+#[tokio::test]
+async fn admins_manage_the_ai_assistant_in_the_app() {
+    const KEY: &str = "sk-test-key-0123456789";
+    let base = mock_anthropic(KEY).await;
+    let dir = tempfile::tempdir().unwrap();
+    let url = format!("sqlite://{}", dir.path().join("test.db").display());
+    let build = || async {
+        let state = larder_server::build_state(Config::for_tests(dir.path().to_path_buf(), url.clone())).await.expect("state");
+        TestApp { app: larder_server::app(state), _dir: tempfile::tempdir().unwrap() }
+    };
+    let t = build().await;
+    let (_, a) = t.req("POST", "/api/auth/register", None, Some(json!({"username": "admin", "password": "password123"}))).await;
+    let admin = a["access_token"].as_str().unwrap().to_string();
+    let (_, inv) = t.req("POST", "/api/household/invites", Some(&admin), None).await;
+    let (_, b) = t
+        .req("POST", "/api/auth/register", None, Some(json!({"username": "member", "password": "password123", "invite_code": inv["code"]})))
+        .await;
+    let member = b["access_token"].as_str().unwrap().to_string();
+
+    // off at first; members cannot see or change it
+    let (s, ai) = t.req("GET", "/api/admin/settings/ai", Some(&admin), None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(ai["source"], "off");
+    assert_eq!(ai["enabled"], false);
+    assert_eq!(ai["defaults"]["anthropic"]["needs_key"], true);
+    assert!(ai["defaults"]["anthropic"]["model"].is_string());
+    for (m, body) in [("GET", None), ("PUT", Some(json!({"provider": "anthropic", "api_key": KEY}))), ("DELETE", None)] {
+        let (s, _) = t.req(m, "/api/admin/settings/ai", Some(&member), body).await;
+        assert_eq!(s, StatusCode::FORBIDDEN, "{m}");
+    }
+    let (s, _) = t.req("POST", "/api/import/text", Some(&admin), Some(json!({"text": "x", "use_llm": true}))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "llm disabled");
+
+    // a key is required for Anthropic; bad input is rejected
+    let (s, _) = t.req("PUT", "/api/admin/settings/ai", Some(&admin), Some(json!({"provider": "anthropic", "base_url": base}))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let (s, _) = t.req("PUT", "/api/admin/settings/ai", Some(&admin), Some(json!({"provider": "skynet", "api_key": KEY}))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+
+    // save: works at once, the key is never sent back
+    let (s, ai) = t
+        .req(
+            "PUT",
+            "/api/admin/settings/ai",
+            Some(&admin),
+            Some(json!({"provider": "anthropic", "api_key": KEY, "base_url": base, "model": "claude-sonnet-5-5"})),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{ai}");
+    assert_eq!(ai["source"], "server");
+    assert_eq!(ai["enabled"], true);
+    assert_eq!(ai["has_key"], true);
+    assert_eq!(ai["key_hint"], "6789");
+    assert_eq!(ai["model"], "claude-sonnet-5-5");
+    assert!(!ai.to_string().contains(KEY));
+    let (_, cfg) = t.req("GET", "/api/config", None, None).await;
+    assert_eq!(cfg["llm_enabled"], true);
+    let (s, ok) = t.req("POST", "/api/admin/settings/ai/test", Some(&admin), None).await;
+    assert_eq!(s, StatusCode::OK, "{ok}");
+    assert_eq!(ok["ok"], true);
+    let (s, parsed) =
+        t.req("POST", "/api/parse/ingredients", Some(&admin), Some(json!({"lines": ["2 cups flour"], "use_llm": true}))).await;
+    assert_eq!(s, StatusCode::OK, "{parsed}");
+    assert_eq!(parsed[0]["food"], "flour");
+
+    // leaving the key out keeps it for the same provider and address
+    let (s, ai) = t.req("PUT", "/api/admin/settings/ai", Some(&admin), Some(json!({"provider": "anthropic", "base_url": base}))).await;
+    assert_eq!(s, StatusCode::OK, "{ai}");
+    assert_eq!(ai["has_key"], true);
+    assert!(ai["model"].as_str().unwrap().starts_with("claude-"), "back to the default model");
+    // but not when the address changes: the saved key is never sent somewhere new
+    let (s, e) = t
+        .req("PUT", "/api/admin/settings/ai", Some(&admin), Some(json!({"provider": "anthropic", "base_url": "https://elsewhere.example"})))
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{e}");
+
+    // the saved settings survive a restart (the key is decrypted with the same signing secret)
+    let t2 = build().await;
+    let (_, ai) = t2.req("GET", "/api/admin/settings/ai", Some(&admin), None).await;
+    assert_eq!(ai["source"], "server");
+    assert_eq!(ai["key_hint"], "6789");
+    let (s, _) = t2.req("POST", "/api/admin/settings/ai/test", Some(&admin), None).await;
+    assert_eq!(s, StatusCode::OK);
+
+    // a wrong key saves, and the test says so
+    let (s, _) = t
+        .req(
+            "PUT",
+            "/api/admin/settings/ai",
+            Some(&admin),
+            Some(json!({"provider": "anthropic", "api_key": "sk-wrong-key-000000", "base_url": base})),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, e) = t.req("POST", "/api/admin/settings/ai/test", Some(&admin), None).await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{e}");
+    assert!(e["error"].as_str().unwrap().contains("invalid x-api-key"));
+
+    // turning it off
+    let (s, _) = t.req("DELETE", "/api/admin/settings/ai", Some(&admin), None).await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (_, cfg) = t.req("GET", "/api/config", None, None).await;
+    assert_eq!(cfg["llm_enabled"], false);
+    let (s, _) = t.req("POST", "/api/admin/settings/ai/test", Some(&admin), None).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn environment_ai_settings_are_read_only_in_the_app() {
+    let t = TestApp::with_config(None, |c| {
+        c.llm = larder_server::config::LlmConfig::from_parts("anthropic", Some("sk-env-key-0123456789".into()), None, None).unwrap();
+    })
+    .await;
+    let (_, a) = t.req("POST", "/api/auth/register", None, Some(json!({"username": "admin", "password": "password123"}))).await;
+    let admin = a["access_token"].as_str().unwrap();
+    let (_, ai) = t.req("GET", "/api/admin/settings/ai", Some(admin), None).await;
+    assert_eq!(ai["source"], "environment");
+    assert_eq!(ai["key_hint"], "6789");
+    assert!(!ai.to_string().contains("sk-env-key"));
+    let (s, _) =
+        t.req("PUT", "/api/admin/settings/ai", Some(admin), Some(json!({"provider": "openai", "api_key": "sk-other-key-123"}))).await;
+    assert_eq!(s, StatusCode::CONFLICT);
+    let (s, _) = t.req("DELETE", "/api/admin/settings/ai", Some(admin), None).await;
+    assert_eq!(s, StatusCode::CONFLICT);
+}

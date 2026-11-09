@@ -335,7 +335,7 @@ pub async fn parse_ingredients(
         return Err(AppError::bad_request("too many lines (max 500)"));
     }
     if req.use_llm {
-        let llm = state.llm.as_ref().ok_or_else(AppError::llm_disabled)?;
+        let llm = state.ai.client().ok_or_else(AppError::llm_disabled)?;
         return Ok(Json(llm.parse_ingredients(&req.lines).await.map_err(|e| AppError::unprocessable(format!("{e:#}")))?));
     }
     Ok(Json(req.lines.iter().map(|l| Ingredient::parse(l)).collect()))

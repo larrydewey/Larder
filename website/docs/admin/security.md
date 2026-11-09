@@ -148,7 +148,16 @@ as JSON data and only ever rendered as plain text, never evaluated as markup.
 When AI assist is enabled, **recipe text and photos that users choose to import with AI are
 sent to the configured provider** (Anthropic, OpenAI or your OpenAI-compatible endpoint),
 along with a fixed instruction prompt. Nothing else is sent. The server's API key never
-reaches clients. In standalone mode the user's own key is stored on the phone and the phone
+reaches clients.
+
+A key entered by an admin in the app is stored in the database encrypted with AES-256-GCM.
+The encryption key is derived (HKDF-SHA256) from the server's token-signing secret
+(`jwt_secret` in the data directory, or `LARDER_JWT_SECRET`), so a copy of the database alone,
+such as a PostgreSQL dump, does not reveal it. Admins can replace or remove the key but never
+read it back; the API returns only its last four characters. If the signing secret changes,
+the saved key can no longer be read and must be entered again. Changing the provider or base
+URL requires entering the key again, so a stolen admin session cannot redirect the saved key
+to another server. In standalone mode the user's own key is stored on the phone and the phone
 talks to the provider directly. Use Ollama or another self-hosted model to keep data on your
 own hardware. See [AI assist](../guide/ai.md#what-is-sent-to-the-provider).
 

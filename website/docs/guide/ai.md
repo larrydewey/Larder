@@ -14,9 +14,32 @@ including a local **Ollama** server.
 
 ## Turning it on
 
-=== "Server (connected mode and web)"
+=== "Server: in the app"
 
-    A server administrator sets environment variables:
+    A server admin opens **Settings → Household → AI assistant** in the app or the web UI
+    (only admins see it):
+
+    1. Choose the **Provider**: **Anthropic (Claude)**, **OpenAI-compatible** or **Ollama
+       (self-hosted)**.
+    2. Paste the **API key** (for Anthropic, create one at console.anthropic.com under API
+       Keys; Ollama usually needs none).
+    3. Optionally set a **Model** (empty means the default in the table below) and, for
+       self-hosted or other compatible services, a **Base URL**.
+    4. Tap **Save**, then **Test**: Larder sends one small request and reports "Working".
+
+    The change applies at once for everyone on the server, without a restart. People may need
+    to reopen the app (or the Import screen) to see the **Photo** tab.
+
+    The key is stored encrypted on the server and is never shown again, only its last four
+    characters ("Key ending in …"). To change other settings, leave the key empty to keep it.
+    Changing the provider or the base URL needs the key entered again, so a saved key is never
+    sent to a new address. **Turn off** deletes the saved settings and key.
+
+=== "Server: environment variables"
+
+    Instead of the app, a server administrator can set environment variables. They take
+    precedence: the app then shows the settings read-only ("These settings come from the
+    LARDER_LLM_* environment variables").
 
     ```bash
     LARDER_LLM_PROVIDER=anthropic          # or openai, ollama

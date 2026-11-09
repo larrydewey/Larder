@@ -16,6 +16,7 @@ import 'features/organize/organize_screen.dart';
 import 'features/recipes/recipe_detail_screen.dart';
 import 'features/recipes/recipe_list_screen.dart';
 import 'features/settings/admin_users_screen.dart';
+import 'features/settings/ai_settings_screen.dart';
 import 'features/settings/household_screen.dart';
 import 'features/settings/settings_screen.dart';
 import 'features/setup/migration_screen.dart';
@@ -132,6 +133,7 @@ final routerProvider = Provider<GoRouter>((ref) {
                 routes: [
                   GoRoute(path: 'household', builder: (_, _) => const HouseholdScreen()),
                   GoRoute(path: 'admin', builder: (_, _) => const AdminUsersScreen()),
+                  GoRoute(path: 'ai', builder: (_, _) => const AiSettingsScreen()),
                 ],
               ),
             ],
