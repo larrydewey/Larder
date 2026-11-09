@@ -44,7 +44,7 @@ The suggestion comes from keywords, mainly in the recipe **name**:
 
 Keywords match whole words, also in plural form.
 
-Examples: "Grandma's Buttermilk Pancakes" → Breakfast; "Classic Chili" → Soups & Stews;
+Examples: "Buttermilk Pancakes" → Breakfast; "Classic Chili" → Soups & Stews;
 "Turkey Pot Pie" → Main Dishes; "Creamy Mashed Potatoes" → Side Dishes; "Taco
 Seasoning (Spice Mix)" → Seasonings & Spice Mixes; "Hot Apple Cider" → Drinks; "Homemade Laundry Soap" →
 Household & DIY.

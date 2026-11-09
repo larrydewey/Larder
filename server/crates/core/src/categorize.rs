@@ -481,7 +481,7 @@ mod tests {
     #[test]
     fn suggests_sensible_categories() {
         let cases = [
-            ("Grandma's Buttermilk Pancakes", "Breakfast"),
+            ("Buttermilk Pancakes", "Breakfast"),
             ("Copycat Restaurant Garlic Cheddar Biscuits", "Breads"),
             ("Chocolate Chip Cookies", "Desserts"),
             ("Slow Cooker Chicken Curry", "Main Dishes"),
@@ -520,7 +520,7 @@ mod tests {
         for (name, want) in cases {
             assert_eq!(suggest_category(&r(name, &[])), Some(want), "{name}");
         }
-        assert_eq!(suggest_category(&r("Grandma's Special", &["2 lbs chicken thighs"])), Some("Main Dishes"));
+        assert_eq!(suggest_category(&r("Sunday Special", &["2 lbs chicken thighs"])), Some("Main Dishes"));
         assert_eq!(suggest_category(&r("Mystery", &["1 cup water"])), None);
     }
 }
