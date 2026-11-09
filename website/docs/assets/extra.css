@@ -1,0 +1,21 @@
+@import url("https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap");
+:root, [data-md-color-scheme="default"] {
+  --md-primary-fg-color: #B5532F;
+  --md-primary-fg-color--light: #D27A55;
+  --md-primary-fg-color--dark: #8E3E21;
+  --md-accent-fg-color: #8E3E21;
+  --md-default-bg-color: #FBF6EE;
+}
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #8E3E21;
+  --md-accent-fg-color: #E9967A;
+  --md-hue: 20;
+}
+.md-typeset h1, .md-typeset h2, .md-header__title { font-family: "DM Serif Display", Georgia, serif; font-weight: 400; letter-spacing: 0; }
+.md-typeset img.screenshot { border-radius: 10px; box-shadow: 0 4px 18px rgba(60, 30, 10, .18); }
+.md-typeset .phone img { max-width: 300px; }
+.md-typeset .grid-shots { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
+.md-typeset .hero { text-align: center; padding: 1.5rem 0 1rem; }
+.md-typeset .hero h1 { font-size: 3rem; margin-bottom: .2rem; }
+.md-typeset .hero p { font-size: 1.15rem; }
+.md-typeset .hero .md-button { margin: .3rem .25rem; }

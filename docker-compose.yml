@@ -1,0 +1,26 @@
+# Larder with SQLite (default). Start with:  docker compose up -d
+# For PostgreSQL:  docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d
+services:
+  larder:
+    image: ghcr.io/larrydewey/larder:latest
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - larder-data:/data
+    environment:
+      LARDER_PUBLIC_URL: ${LARDER_PUBLIC_URL:-http://localhost:8080}
+      LARDER_ALLOW_REGISTRATION: ${LARDER_ALLOW_REGISTRATION:-false}
+      # Optional single sign-on (Authentik, Keycloak, Authelia, ...):
+      # LARDER_OIDC_ISSUER: https://auth.example.com/application/o/larder
+      # LARDER_OIDC_CLIENT_ID: larder
+      # LARDER_OIDC_CLIENT_SECRET: change-me
+      # LARDER_OIDC_NAME: Authentik
+      # Optional AI import assist:
+      # LARDER_LLM_PROVIDER: anthropic        # or openai / ollama
+      # LARDER_LLM_API_KEY: ${ANTHROPIC_API_KEY}
+      # LARDER_LLM_MODEL: claude-opus-5-5
+
+volumes:
+  larder-data:

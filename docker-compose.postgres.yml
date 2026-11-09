@@ -1,0 +1,26 @@
+# Overlay that switches Larder to PostgreSQL.
+services:
+  larder:
+    environment:
+      LARDER_DATABASE_URL: postgres://larder:${POSTGRES_PASSWORD:-larder}@postgres:5432/larder
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: larder
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-larder}
+      POSTGRES_DB: larder
+    volumes:
+      - larder-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U larder -d larder"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  larder-postgres:

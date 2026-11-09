@@ -1,0 +1,44 @@
+[package]
+name = "larder-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Larder HTTP server"
+
+[[bin]]
+name = "larder"
+path = "src/main.rs"
+
+[dependencies]
+larder-core.workspace = true
+larder-import.workspace = true
+larder-assist.workspace = true
+larder-cookbook.workspace = true
+anyhow.workspace = true
+base64.workspace = true
+chrono.workspace = true
+image.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+url.workspace = true
+uuid.workspace = true
+argon2 = "0.5"
+axum = { version = "0.8", features = ["multipart", "macros"] }
+jsonwebtoken = "9"
+rand = "0.8"
+sha2 = "0.10"
+hex = "0.4"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "any", "sqlite", "postgres", "migrate", "macros"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["fs", "cors", "trace", "compression-gzip", "limit", "set-header"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+urlencoding = "2"
+mime_guess = "2"
+
+[dev-dependencies]
+http-body-util = "0.1"
+tempfile = "3"

@@ -1,0 +1,7 @@
+.git
+**/target
+**/target-*
+app/build
+app/.dart_tool
+app/android/.gradle
+data

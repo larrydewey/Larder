@@ -1,0 +1,22 @@
+[package]
+name = "larder-cookbook"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Printable cookbook PDF rendering for Larder (Typst embedded as a library)"
+include = ["src/**", "templates/**", "fonts/**", "examples/**", "tests/**", "Cargo.toml"]
+
+[dependencies]
+larder-core.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+regex.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+image.workspace = true
+typst = "0.15"
+typst-pdf = "0.15"
+typst-layout = "0.15"
+typst-assets = { version = "0.15", features = ["fonts"] }
+
