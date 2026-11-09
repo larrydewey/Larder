@@ -85,7 +85,7 @@ exist.
 | **Flutter app** | Builds the engine for the host and for Android (`cargo-ndk`), `flutter analyze`, `flutter test` with `LARDER_ENGINE_LIB`, `flutter build web`, `flutter build apk`; uploads the artifacts `larder-android-apk` and `larder-web`. |
 | **Docker image** | After both, builds the image (not pushed). |
 
-`.github/workflows/release.yml` runs on `v*` tags: it builds and pushes the multi-arch image
+`.github/workflows/release.yml` runs on `v*` tags: it builds and pushes the `linux/amd64` image
 to `ghcr.io/<owner>/larder` (tags: version and `latest`) and attaches per-ABI APKs to the
 GitHub release, signed with the release key from the `ANDROID_KEYSTORE_*` secrets (see
 [Signing release APKs](building.md#signing-release-apks); without them it warns and uses a

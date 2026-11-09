@@ -60,8 +60,9 @@ keeps your data and downloads the photos to the phone. See
 
 ## What the server needs
 
-- A small machine: the server is a single binary. A Raspberry Pi-class machine or any VPS is
-  enough for a household. PDF rendering and large imports are the heaviest operations.
+- A small x86-64 machine: the server is a single binary, and a small NAS or any VPS is enough
+  for a household. PDF rendering and large imports are the heaviest operations. The published
+  image is `linux/amd64` only; on ARM, such as a Raspberry Pi, build the binary from source.
 - Docker (recommended) or a Linux machine to run the binary.
 - Optional: PostgreSQL. SQLite is the default and fine for households.
 - Optional: a domain name and a reverse proxy for HTTPS, needed if you want to reach it from

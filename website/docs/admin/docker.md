@@ -6,7 +6,7 @@
 |---|---|
 | Image | `ghcr.io/larrydewey/larder` |
 | Tags | `latest` and the release version (for example `0.1.0`), published for every `v*` tag |
-| Platforms | `linux/amd64`, `linux/arm64` |
+| Platform | `linux/amd64` |
 | Base | `debian:bookworm-slim` with CA certificates and time zone data |
 | User | `larder` (uid 10001), not root |
 | Port | 8080 |

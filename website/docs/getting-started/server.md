@@ -1,7 +1,7 @@
 # Install the server
 
 The server is published as a container image, `ghcr.io/larrydewey/larder`, for `linux/amd64`
-and `linux/arm64`. The image contains the `larder` binary and the built web UI, runs as an
+only. The image contains the `larder` binary and the built web UI, runs as an
 unprivileged user (uid 10001), listens on port 8080 and keeps all its data in the `/data`
 volume.
 

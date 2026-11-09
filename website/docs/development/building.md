@@ -173,11 +173,8 @@ The multi-stage `Dockerfile`:
 3. **runtime**: `debian:bookworm-slim` with CA certificates and tzdata, user `larder`
    (uid 10001), the binary at `/usr/local/bin/larder` and the web build at `/app/web`.
 
-Multi-architecture images, as published by the release workflow:
-
-```bash
-docker buildx build --platform linux/amd64,linux/arm64 -t you/larder:dev .
-```
+The image is built for `linux/amd64` only, because the Flutter Linux SDK used by the web stage
+is x64 only.
 
 ## Sample cookbooks
 
