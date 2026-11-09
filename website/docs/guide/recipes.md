@@ -88,7 +88,7 @@ On wide screens (960 px and more) ingredients and instructions sit side by side.
 | **⋮ → Add to meal plan** | Pick a date, a meal (Breakfast, Lunch, Dinner, Snack) and servings (prefilled with the servings currently shown), then **Add** |
 | **⋮ → Add to shopping list** | Pick a list or **New list…**, confirm the servings, and the ingredients are scaled and merged into the list |
 | **⋮ → Duplicate** | Creates "*Name* (copy)" with its own copy of the photo, and opens it. Needs a server connection in connected mode. |
-| **⋮ → Share** | Shares the name, description and source URL as text through the system share sheet |
+| **⋮ → Share** | Opens the system share sheet with the recipe's name and its link on your Larder server. People in your household open it signed in; others need an account. In standalone mode it shares the recipe itself as text. The source URL is never shared, because it is attribution and your copy may differ from the original. |
 | **⋮ → Open source** | Opens the source URL (only shown when there is one) |
 | **⋮ → Delete** | After confirmation ("will be removed for everyone in your household") the recipe and its photo are deleted |
 

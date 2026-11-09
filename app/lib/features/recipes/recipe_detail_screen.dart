@@ -6,11 +6,13 @@ import 'package:material_ui/material_ui.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../data/app_mode.dart';
 import '../../data/preferences.dart';
 import '../../data/providers.dart';
 import '../../data/backend.dart';
 import '../../models/recipe.dart';
 import '../../util/scaling.dart';
+import '../../util/share.dart';
 import '../../util/timers.dart';
 import '../../util/units.dart';
 import '../../widgets/rating.dart';
@@ -273,12 +275,17 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
             final copy = await runOnline(() => repo.duplicate(r.id));
             if (copy != null && context.mounted) context.go('/recipes/${copy.id}');
           case 'share':
-            final text = [
-              r.name,
-              if (r.description.isNotEmpty) r.description,
-              if (r.sourceUrl != null) r.sourceUrl!,
-            ].join('\n\n');
-            await SharePlus.instance.share(ShareParams(text: text, subject: r.name));
+            Uri? link;
+            if (ref.read(appModeProvider) == AppMode.connected) {
+              final base = ref.read(apiClientProvider).baseUrl;
+              link = recipeLink(base.isEmpty ? Uri.base.origin : base, r);
+            }
+            await SharePlus.instance.share(
+              ShareParams(
+                text: recipeShareText(r, link: link),
+                subject: r.name,
+              ),
+            );
           case 'source':
             final uri = Uri.tryParse(r.sourceUrl ?? '');
             if (uri != null) await launchUrl(uri, mode: LaunchMode.externalApplication);
