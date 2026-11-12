@@ -2021,6 +2021,7 @@ dependencies = [
 name = "larder-core"
 version = "0.1.4"
 dependencies = [
+ "chrono",
  "regex",
  "serde",
  "serde_json",

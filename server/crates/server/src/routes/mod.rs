@@ -44,6 +44,7 @@ pub fn router(state: AppState) -> Router {
         .route("/recipes/{id}/duplicate", post(recipes::duplicate))
         .route("/recipes/{id}/share", get(share::get_share).post(share::create_share).delete(share::delete_share))
         .route("/recipes/{id}/favorite", put(recipes::favorite).delete(recipes::unfavorite))
+        .route("/recipes/{id}/tried", post(recipes::tried))
         .route("/recipes/{id}/image", put(recipes::upload_image).post(recipes::upload_image).delete(recipes::delete_image))
         .route("/images/{id}", get(recipes::serve_image))
         .route("/tags", get(recipes::tags))

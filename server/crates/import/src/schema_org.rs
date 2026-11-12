@@ -360,7 +360,7 @@ pub fn recipe_from_json(v: &Value, base_url: Option<&str>) -> Option<ImportedRec
     data.normalize();
     let image = get(v, &["image", "thumbnailUrl", "photo"]).and_then(|i| image_url(i, base_url)).map(ImageSource::Url);
     let created_at = text_of(v, &["dateCreated"]).and_then(|s| to_rfc3339(&s));
-    Some(ImportedRecipe { data, image, created_at, favorite: false })
+    Some(ImportedRecipe { data, image, created_at, favorite: false, trial: None })
 }
 
 #[cfg(test)]

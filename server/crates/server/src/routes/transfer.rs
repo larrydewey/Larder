@@ -1,5 +1,10 @@
 //! Import (files, URLs, text, photos, live Mealie) and export (JSON backup,
 //! printable cookbook PDF) endpoints.
+//!
+//! Single-recipe imports (URL, text, photo) land on the trial list unless the
+//! request says otherwise; bulk imports go to the cookbook, and Larder archives
+//! keep each recipe's stored status. The printed cookbook never includes
+//! trial recipes.
 
 use axum::body::Body;
 use axum::extract::{Multipart, Path, State};
@@ -7,7 +12,7 @@ use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use larder_core::RecipeData;
+use larder_core::{RecipeData, RecipeStatus, TrialState};
 use larder_import::{ImageSource, ImportedRecipe, Source};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -48,20 +53,29 @@ fn auto_categorize(d: &mut RecipeData) {
     }
 }
 
-async fn save_or_preview(state: &AppState, user: &AuthUser, mut imported: ImportedRecipe, save: bool) -> AppResult<Response> {
+/// Single-recipe imports default to the trial list; `status` overrides that.
+async fn save_or_preview(
+    state: &AppState,
+    user: &AuthUser,
+    mut imported: ImportedRecipe,
+    save: bool,
+    status: Option<RecipeStatus>,
+) -> AppResult<Response> {
     auto_categorize(&mut imported.data);
+    let trial = imported.trial_state(status, RecipeStatus::Trial);
     if !save {
         let mut v = serde_json::to_value(&imported.data)?;
         if let Some(ImageSource::Url(u)) = &imported.image {
             v["image_url"] = json!(u);
         }
+        v["status"] = json!(trial.status);
         return Ok((StatusCode::OK, Json(v)).into_response());
     }
-    let recipe = store_imported(state, user, imported).await?;
+    let recipe = store_imported(state, user, imported, trial).await?;
     Ok((StatusCode::CREATED, Json(recipe)).into_response())
 }
 
-async fn store_imported(state: &AppState, user: &AuthUser, imported: ImportedRecipe) -> AppResult<recipes::Recipe> {
+async fn store_imported(state: &AppState, user: &AuthUser, imported: ImportedRecipe, trial: TrialState) -> AppResult<recipes::Recipe> {
     let image_id = match imported.image {
         Some(src) => resolve_image(state, src).await,
         None => None,
@@ -71,7 +85,7 @@ async fn store_imported(state: &AppState, user: &AuthUser, imported: ImportedRec
         &user.household_id,
         &user.id,
         imported.data,
-        InsertOpts { id: None, created_by: Some(&user.id), created_at: imported.created_at, image_id },
+        InsertOpts { id: None, created_by: Some(&user.id), created_at: imported.created_at, image_id, trial },
     )
     .await?;
     if imported.favorite {
@@ -136,6 +150,9 @@ struct UrlReq {
     url: String,
     #[serde(default = "yes")]
     save: bool,
+    /// Default `trial`.
+    #[serde(default)]
+    status: Option<RecipeStatus>,
 }
 
 fn yes() -> bool {
@@ -145,7 +162,7 @@ fn yes() -> bool {
 async fn import_url(State(state): State<AppState>, user: AuthUser, Json(req): Json<UrlReq>) -> AppResult<Response> {
     let url = check_public_url(&req.url).await?;
     let imported = larder_import::scrape_url(&state.fetch, url.as_str()).await.map_err(bad_import)?;
-    save_or_preview(&state, &user, imported, req.save).await
+    save_or_preview(&state, &user, imported, req.save, req.status).await
 }
 
 #[derive(Deserialize)]
@@ -155,6 +172,9 @@ struct TextReq {
     save: bool,
     #[serde(default)]
     use_llm: bool,
+    /// Default `trial`.
+    #[serde(default)]
+    status: Option<RecipeStatus>,
 }
 
 async fn import_text(State(state): State<AppState>, user: AuthUser, Json(req): Json<TextReq>) -> AppResult<Response> {
@@ -175,14 +195,23 @@ async fn import_text(State(state): State<AppState>, user: AuthUser, Json(req): J
     if data.name.trim().is_empty() {
         return Err(AppError::unprocessable("could not find a recipe title in the text"));
     }
-    let imported = ImportedRecipe { data, image: None, created_at: None, favorite: false };
-    save_or_preview(&state, &user, imported, req.save).await
+    let imported = ImportedRecipe { data, image: None, created_at: None, favorite: false, trial: None };
+    save_or_preview(&state, &user, imported, req.save, req.status).await
+}
+
+/// Parses an optional `status` form field (empty = not given).
+fn status_field(v: Option<String>) -> AppResult<Option<RecipeStatus>> {
+    match v.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        None => Ok(None),
+        Some(s) => RecipeStatus::parse(s).map(Some).ok_or_else(|| AppError::bad_request("status must be cookbook or trial")),
+    }
 }
 
 async fn import_image(State(state): State<AppState>, user: AuthUser, mp: Multipart) -> AppResult<Response> {
     let llm = state.ai.client().ok_or_else(AppError::llm_disabled)?;
     let (bytes, _, fields) = read_upload(mp, "file").await?;
     let save = fields.iter().any(|(k, v)| k == "save" && v == "true");
+    let status = status_field(fields.iter().find(|(k, _)| k == "status").map(|(_, v)| v.clone()))?;
     // Normalise to a reasonably sized JPEG for the model.
     let jpeg = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<u8>> {
         let img = crate::images::decode(&bytes)?;
@@ -198,12 +227,13 @@ async fn import_image(State(state): State<AppState>, user: AuthUser, mp: Multipa
         .recipe_from_image(larder_assist::ImageInput { bytes: jpeg.clone(), media_type: "image/jpeg".into() })
         .await
         .map_err(|e| AppError::unprocessable(format!("{e:#}")))?;
-    let mut imported = ImportedRecipe { data, image: None, created_at: None, favorite: false };
+    let mut imported = ImportedRecipe { data, image: None, created_at: None, favorite: false, trial: None };
     if !save {
-        return save_or_preview(&state, &user, imported, false).await;
+        return save_or_preview(&state, &user, imported, false, status).await;
     }
     auto_categorize(&mut imported.data);
-    let mut recipe = store_imported(&state, &user, imported).await?;
+    let trial = imported.trial_state(status, RecipeStatus::Trial);
+    let mut recipe = store_imported(&state, &user, imported, trial).await?;
     // Keep the photo as the recipe image.
     if let Ok(img) = state.images.save(jpeg).await {
         recipes::set_image(&state, &user.household_id, &recipe.id, Some(img)).await?;
@@ -332,7 +362,8 @@ async fn import_one(state: &AppState, user: &AuthUser, p: &mut Progress, mut imp
             }
         }
     }
-    match store_imported(state, user, imported).await {
+    let trial = imported.trial_state(opts.status, RecipeStatus::Cookbook);
+    match store_imported(state, user, imported, trial).await {
         Ok(r) => {
             p.imported += 1;
             p.recipe_ids.push(r.id);
@@ -349,6 +380,7 @@ async fn import_file(State(state): State<AppState>, user: AuthUser, mp: Multipar
     let opts = JobOpts {
         skip_duplicates: field("skip_duplicates").map(|v| v != "false").unwrap_or(true),
         categorize: field("categorize").map(|v| v != "false").unwrap_or(true),
+        status: status_field(field("status"))?,
     };
     let filename = filename.unwrap_or_else(|| "upload".into());
     let job_id = create_job(&state, &user, source.as_str()).await?;
@@ -395,6 +427,8 @@ struct MealieReq {
     skip_duplicates: bool,
     #[serde(default = "yes")]
     categorize: bool,
+    #[serde(default)]
+    status: Option<RecipeStatus>,
 }
 
 /// Options shared by background import jobs.
@@ -403,6 +437,9 @@ struct JobOpts {
     skip_duplicates: bool,
     /// Give recipes without a category the suggested one.
     categorize: bool,
+    /// Put every recipe in the cookbook or on the trial list. `None`: the
+    /// cookbook, except that Larder archives keep each recipe's status.
+    status: Option<RecipeStatus>,
 }
 
 async fn import_mealie(State(state): State<AppState>, user: AuthUser, Json(req): Json<MealieReq>) -> AppResult<Response> {
@@ -412,6 +449,7 @@ async fn import_mealie(State(state): State<AppState>, user: AuthUser, Json(req):
     let slugs = client.list_slugs().await.map_err(bad_import)?;
     let job_id = create_job(&state, &user, "mealie").await?;
     let job = load_job(&state, &user.household_id, &job_id).await?;
+    let opts = JobOpts { skip_duplicates: req.skip_duplicates, categorize: req.categorize, status: req.status };
     let st = state.clone();
     tokio::spawn(async move {
         let mut p = Progress::new(job_id);
@@ -419,9 +457,7 @@ async fn import_mealie(State(state): State<AppState>, user: AuthUser, Json(req):
         p.flush(&st, "running").await;
         for (i, slug) in slugs.iter().enumerate() {
             match client.fetch(slug).await {
-                Ok(r) => {
-                    import_one(&st, &user, &mut p, r, JobOpts { skip_duplicates: req.skip_duplicates, categorize: req.categorize }).await
-                }
+                Ok(r) => import_one(&st, &user, &mut p, r, opts).await,
                 Err(e) => p.error(format!("Recipe '{slug}': {e}")),
             }
             if i % 5 == 4 {
@@ -468,6 +504,7 @@ async fn export_json(State(state): State<AppState>, user: AuthUser) -> AppResult
             data: r.data,
             image: image.as_ref().map(|_| format!("images/{}.jpg", r.id)),
             favorite: r.is_favorite,
+            trial: r.trial,
             created_at: Some(r.created_at),
             updated_at: Some(r.updated_at),
         };
@@ -493,11 +530,23 @@ struct CookbookReq {
     options: larder_cookbook::CookbookOptions,
 }
 
-async fn export_cookbook(State(state): State<AppState>, user: AuthUser, Json(req): Json<CookbookReq>) -> AppResult<Response> {
-    let mut all = recipes::load_all(&state, &user.household_id, &user.id, None).await?;
-    if let Some(ids) = &req.recipe_ids {
+/// The recipes a printed cookbook contains: with `ids` only those (by id or
+/// slug), and never trial recipes, which are not vetted yet, even when they
+/// are picked explicitly.
+fn cookbook_selection(mut all: Vec<recipes::Recipe>, ids: Option<&[String]>) -> Vec<recipes::Recipe> {
+    all.retain(|r| !r.trial.status.is_trial());
+    if let Some(ids) = ids {
         let wanted: std::collections::HashSet<&String> = ids.iter().collect();
         all.retain(|r| wanted.contains(&r.id) || wanted.contains(&r.slug));
+    }
+    all
+}
+
+async fn export_cookbook(State(state): State<AppState>, user: AuthUser, Json(req): Json<CookbookReq>) -> AppResult<Response> {
+    let all = recipes::load_all(&state, &user.household_id, &user.id, None).await?;
+    let all = cookbook_selection(all, req.recipe_ids.as_deref());
+    if req.recipe_ids.is_some() && all.is_empty() {
+        return Err(AppError::bad_request("none of the chosen recipes can be printed (trial recipes are left out of the cookbook)"));
     }
     if all.len() > 5000 {
         return Err(AppError::bad_request("too many recipes for one cookbook (max 5000)"));
@@ -521,4 +570,36 @@ async fn export_cookbook(State(state): State<AppState>, user: AuthUser, Json(req
         name = "cookbook".into();
     }
     Ok(attachment(pdf, "application/pdf", &format!("{name}.pdf")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn recipe(id: &str, status: RecipeStatus) -> recipes::Recipe {
+        recipes::Recipe {
+            id: id.into(),
+            household_id: "h".into(),
+            slug: format!("{id}-slug"),
+            data: RecipeData { name: id.into(), ..Default::default() },
+            trial: TrialState::new(status),
+            image_url: None,
+            image_id: None,
+            is_favorite: false,
+            created_by: None,
+            created_at: String::new(),
+            updated_at: String::new(),
+            version: 1,
+        }
+    }
+
+    #[test]
+    fn the_printed_cookbook_leaves_out_trial_recipes() {
+        let all = || vec![recipe("a", RecipeStatus::Cookbook), recipe("b", RecipeStatus::Trial), recipe("c", RecipeStatus::Cookbook)];
+        let ids = |v: &[recipes::Recipe]| v.iter().map(|r| r.id.clone()).collect::<Vec<_>>();
+        assert_eq!(ids(&cookbook_selection(all(), None)), ["a", "c"]);
+        let picked = vec!["b".to_string(), "c-slug".to_string()];
+        assert_eq!(ids(&cookbook_selection(all(), Some(&picked))), ["c"]);
+        assert!(cookbook_selection(all(), Some(&["b".to_string()])).is_empty());
+    }
 }

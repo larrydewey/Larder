@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use larder_core::{Ingredient, Instruction, RecipeData};
+use larder_core::{Ingredient, Instruction, RecipeData, RecipeStatus, TrialState};
 use serde::Serialize;
 use sqlx::any::AnyRow;
 
@@ -19,6 +19,9 @@ pub struct Recipe {
     pub slug: String,
     #[serde(flatten)]
     pub data: RecipeData,
+    /// `status`, `tried_count` and `last_tried_at` (household-wide).
+    #[serde(flatten)]
+    pub trial: TrialState,
     pub image_url: Option<String>,
     #[serde(skip)]
     pub image_id: Option<String>,
@@ -43,13 +46,17 @@ pub struct RecipeSummary {
     pub yield_quantity: Option<f64>,
     pub yield_unit: String,
     pub is_favorite: bool,
+    pub status: RecipeStatus,
+    pub tried_count: i64,
+    pub last_tried_at: Option<String>,
+    pub created_at: String,
     pub updated_at: String,
 }
 
 pub const RECIPE_COLS: &str = "r.id, r.household_id, r.slug, r.name, r.description, r.yield_quantity, r.yield_unit, \
     r.prep_time_minutes, r.cook_time_minutes, r.total_time_minutes, r.source_url, r.source_name, r.notes, r.rating, \
     r.ingredients, r.instructions, r.tags, r.categories, r.nutrition, r.image_id, r.created_by, r.created_at, \
-    r.updated_at, r.version";
+    r.updated_at, r.version, r.status, r.tried_count, r.last_tried_at";
 
 /// SQL fragment yielding `is_fav` (0/1) for user `$1`.
 pub const FAV_EXPR: &str = "(SELECT COUNT(*) FROM favorites f WHERE f.recipe_id = r.id AND f.user_id = $1) AS is_fav";
@@ -78,6 +85,11 @@ pub fn recipe_from_row(r: &AnyRow) -> Recipe {
             categories: r.json::<Vec<String>>("categories"),
             nutrition: r.json::<BTreeMap<String, String>>("nutrition"),
         },
+        trial: TrialState {
+            status: RecipeStatus::parse(&r.s("status")).unwrap_or_default(),
+            tried_count: r.i("tried_count"),
+            last_tried_at: r.os("last_tried_at"),
+        },
         image_url: image_url(&image_id),
         image_id,
         is_favorite: r.oi("is_fav").unwrap_or(0) > 0,
@@ -103,6 +115,10 @@ impl Recipe {
             yield_quantity: self.data.yield_quantity,
             yield_unit: self.data.yield_unit.clone(),
             is_favorite: self.is_favorite,
+            status: self.trial.status,
+            tried_count: self.trial.tried_count,
+            last_tried_at: self.trial.last_tried_at.clone(),
+            created_at: self.created_at.clone(),
             updated_at: self.updated_at.clone(),
         }
     }
@@ -172,6 +188,9 @@ pub struct InsertOpts<'a> {
     pub created_by: Option<&'a str>,
     pub created_at: Option<String>,
     pub image_id: Option<String>,
+    /// Status and trial counters for the new recipe (normally just a status;
+    /// restored backups and migrations also carry the counters).
+    pub trial: TrialState,
 }
 
 /// Inserts a new recipe. Returns `(recipe, created)`; if a recipe with the same
@@ -185,6 +204,8 @@ pub async fn insert(
 ) -> AppResult<(Recipe, bool)> {
     data.normalize();
     data.validate().map_err(AppError::bad_request)?;
+    let mut trial = opts.trial;
+    trial.normalize();
     let id = crate::db::id_or_new(opts.id.as_deref())?;
     if let Some(row) = sqlx::query("SELECT household_id FROM recipes WHERE id = $1").bind(&id).fetch_optional(&state.db.pool).await? {
         if row.s("household_id") == household {
@@ -201,8 +222,9 @@ pub async fn insert(
         let res = sqlx::query(
             "INSERT INTO recipes (id, household_id, slug, name, description, yield_quantity, yield_unit, prep_time_minutes, \
              cook_time_minutes, total_time_minutes, source_url, source_name, notes, rating, ingredients, instructions, tags, \
-             categories, nutrition, image_id, search_text, name_lower, created_by, created_at, updated_at, version) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,1)",
+             categories, nutrition, image_id, search_text, name_lower, created_by, created_at, updated_at, version, status, \
+             tried_count, last_tried_at) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,1,$26,$27,$28)",
         )
         .bind(&id)
         .bind(household)
@@ -229,6 +251,9 @@ pub async fn insert(
         .bind(opts.created_by.map(str::to_string))
         .bind(&created_at)
         .bind(&ts)
+        .bind(trial.status.as_str())
+        .bind(trial.tried_count)
+        .bind(trial.last_tried_at.clone())
         .execute(&mut *tx)
         .await;
         match res {
@@ -264,13 +289,16 @@ async fn write_tags(tx: &mut sqlx::Transaction<'_, sqlx::Any>, id: &str, househo
     Ok(())
 }
 
-/// Replaces a recipe's content. `expected_version` enables optimistic concurrency.
+/// Replaces a recipe's content and, when given, its status (the trial
+/// counters are only changed by [`record_tried`]). `expected_version` enables
+/// optimistic concurrency.
 pub async fn update(
     state: &AppState,
     household: &str,
     user_id: &str,
     id: &str,
     mut data: RecipeData,
+    status: Option<RecipeStatus>,
     expected_version: Option<i64>,
 ) -> AppResult<Recipe> {
     data.normalize();
@@ -291,7 +319,7 @@ pub async fn update(
         "UPDATE recipes SET slug=$1, name=$2, description=$3, yield_quantity=$4, yield_unit=$5, prep_time_minutes=$6, \
          cook_time_minutes=$7, total_time_minutes=$8, source_url=$9, source_name=$10, notes=$11, rating=$12, ingredients=$13, \
          instructions=$14, tags=$15, categories=$16, nutrition=$17, search_text=$18, name_lower=$19, updated_at=$20, \
-         version = version + 1 WHERE id = $21 AND household_id = $22",
+         status=$23, version = version + 1 WHERE id = $21 AND household_id = $22",
     )
     .bind(&slug)
     .bind(&data.name)
@@ -315,10 +343,55 @@ pub async fn update(
     .bind(now())
     .bind(&current.id)
     .bind(household)
+    .bind(status.unwrap_or(current.trial.status).as_str())
     .execute(&mut *tx)
     .await?;
     write_tags(&mut tx, &current.id, household, &data).await?;
     tx.commit().await?;
+    load(state, household, user_id, &current.id).await
+}
+
+/// "I made this": the household's verdict after making a recipe.
+#[derive(Debug, Clone)]
+pub struct Verdict {
+    /// Move the recipe to the cookbook ("Keep it"); otherwise the status is
+    /// left alone ("Try again").
+    pub keep: bool,
+    /// When it was made (normalised RFC 3339). Also identifies the verdict:
+    /// a replay with the same `tried_at` changes nothing.
+    pub tried_at: String,
+    /// New star rating (1-5), or `None` to keep the current one.
+    pub rating: Option<i64>,
+    /// Dated line to append to the notes (see [`larder_core::trial::note_line`]).
+    pub note_line: Option<String>,
+}
+
+/// Records that a recipe was made: `tried_count + 1`, `last_tried_at`, and
+/// optionally the cookbook status, a rating and a note line, in one atomic
+/// statement so verdicts from several devices never lose an increment.
+/// Replaying the same verdict (same `tried_at`, e.g. an offline outbox retry
+/// after a lost response) is a no-op that returns the recipe.
+pub async fn record_tried(state: &AppState, household: &str, user_id: &str, id: &str, v: Verdict) -> AppResult<Recipe> {
+    let current = load(state, household, user_id, id).await?;
+    let line = v.note_line.unwrap_or_default();
+    sqlx::query(
+        "UPDATE recipes SET tried_count = tried_count + 1, \
+         last_tried_at = CASE WHEN last_tried_at IS NULL OR last_tried_at < $1 THEN $1 ELSE last_tried_at END, \
+         status = COALESCE($2, status), rating = COALESCE($3, rating), \
+         notes = CASE WHEN $4 = '' THEN notes WHEN notes = '' THEN $4 ELSE notes || $5 END, \
+         updated_at = $6, version = version + 1 \
+         WHERE id = $7 AND household_id = $8 AND (last_tried_at IS NULL OR last_tried_at <> $1)",
+    )
+    .bind(&v.tried_at)
+    .bind(v.keep.then_some(RecipeStatus::Cookbook.as_str()))
+    .bind(v.rating)
+    .bind(&line)
+    .bind(format!("\n{line}"))
+    .bind(now())
+    .bind(&current.id)
+    .bind(household)
+    .execute(&state.db.pool)
+    .await?;
     load(state, household, user_id, &current.id).await
 }
 

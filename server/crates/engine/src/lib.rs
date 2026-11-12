@@ -13,7 +13,7 @@ use std::sync::OnceLock;
 
 use larder_core::shopping::{self, RecipeAddition, ShoppingItem};
 use larder_core::units::UnitSystem;
-use larder_core::{Ingredient, RecipeData};
+use larder_core::{Ingredient, RecipeData, RecipeStatus, TrialState};
 use larder_import::{ImageSource, ImportedRecipe, Source};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -337,7 +337,8 @@ fn store_image(src: Option<ImageSource>, image_dir: &Path) -> Option<String> {
 
 fn imported_json(r: ImportedRecipe, image_dir: &Path) -> Value {
     let image_path = store_image(r.image, image_dir);
-    json!({ "data": r.data, "image_path": image_path, "favorite": r.favorite, "created_at": r.created_at })
+    // `trial` is null unless the source records a status (Larder archives).
+    json!({ "data": r.data, "image_path": image_path, "favorite": r.favorite, "created_at": r.created_at, "trial": r.trial })
 }
 
 // ---------------- importers ----------------
@@ -471,6 +472,8 @@ struct BookRecipeReq {
     data: RecipeData,
     #[serde(default)]
     image_path: Option<PathBuf>,
+    #[serde(default)]
+    status: RecipeStatus,
 }
 
 #[derive(Deserialize)]
@@ -485,6 +488,8 @@ fn render_cookbook(r: CookbookReq) -> Result<Value> {
     let book = r
         .recipes
         .into_iter()
+        // Trial recipes never go into the printed book (same rule as the server).
+        .filter(|b| !b.status.is_trial())
         .map(|b| larder_cookbook::BookRecipe {
             id: b.id,
             image: if r.options.include_images { b.image_path.and_then(|p| std::fs::read(p).ok()) } else { None },
@@ -505,6 +510,9 @@ struct BackupRecipe {
     image_path: Option<PathBuf>,
     #[serde(default)]
     favorite: bool,
+    /// `status`, `tried_count`, `last_tried_at`.
+    #[serde(flatten)]
+    trial: TrialState,
     #[serde(default)]
     created_at: Option<String>,
     #[serde(default)]
@@ -528,6 +536,7 @@ fn export_backup(r: BackupReq) -> Result<Value> {
                 id: b.id,
                 data: b.data,
                 favorite: b.favorite,
+                trial: b.trial,
                 created_at: b.created_at,
                 updated_at: b.updated_at,
             };

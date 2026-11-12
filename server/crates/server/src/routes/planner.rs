@@ -18,6 +18,9 @@ use crate::state::AppState;
 
 const MEALS: &[&str] = &["breakfast", "lunch", "dinner", "snack"];
 
+/// Answers to "Did you make it?" on a past meal plan entry for a trial recipe.
+const TRIAL_OUTCOMES: &[&str] = &["keep", "again", "discard", "skipped"];
+
 fn valid_date(d: &str) -> AppResult<String> {
     chrono::NaiveDate::parse_from_str(d.trim(), "%Y-%m-%d")
         .map(|d| d.format("%Y-%m-%d").to_string())
@@ -34,15 +37,21 @@ pub struct MealPlanEntry {
     recipe_id: Option<String>,
     recipe_name: Option<String>,
     recipe_image_url: Option<String>,
+    /// Read-only: the recipe's status (`cookbook` / `trial`), null without a recipe.
+    recipe_status: Option<String>,
     title: Option<String>,
     note: Option<String>,
     servings: Option<f64>,
+    /// How "Did you make it?" was answered for this entry (asked once per entry).
+    trial_outcome: Option<String>,
+    trial_resolved_at: Option<String>,
     created_by: Option<String>,
     updated_at: String,
 }
 
-const MP_SELECT: &str = "SELECT m.id, m.date, m.meal, m.recipe_id, m.title, m.note, m.servings, m.created_by, m.updated_at, \
-    r.name AS recipe_name, r.image_id AS recipe_image_id FROM meal_plan m LEFT JOIN recipes r ON r.id = m.recipe_id";
+const MP_SELECT: &str = "SELECT m.id, m.date, m.meal, m.recipe_id, m.title, m.note, m.servings, m.trial_outcome, \
+    m.trial_resolved_at, m.created_by, m.updated_at, r.name AS recipe_name, r.image_id AS recipe_image_id, \
+    r.status AS recipe_status FROM meal_plan m LEFT JOIN recipes r ON r.id = m.recipe_id";
 
 fn mp_from_row(r: &AnyRow) -> MealPlanEntry {
     MealPlanEntry {
@@ -52,9 +61,12 @@ fn mp_from_row(r: &AnyRow) -> MealPlanEntry {
         recipe_id: r.os("recipe_id"),
         recipe_name: r.os("recipe_name"),
         recipe_image_url: image_url(&r.os("recipe_image_id")),
+        recipe_status: r.os("recipe_status"),
         title: r.os("title"),
         note: r.os("note"),
         servings: r.of("servings"),
+        trial_outcome: r.os("trial_outcome"),
+        trial_resolved_at: r.os("trial_resolved_at"),
         created_by: r.os("created_by"),
         updated_at: r.s("updated_at"),
     }
@@ -101,6 +113,19 @@ pub struct MealPlanInput {
     title: Option<String>,
     note: Option<String>,
     servings: Option<f64>,
+    /// Omitted or null leaves it unchanged; `""` clears it.
+    #[serde(default)]
+    trial_outcome: Option<String>,
+}
+
+/// The validated `trial_outcome` change: `None` = leave as is, `Some(None)` = clear.
+fn trial_outcome_change(input: &MealPlanInput) -> AppResult<Option<Option<String>>> {
+    match input.trial_outcome.as_deref().map(str::trim) {
+        None => Ok(None),
+        Some("") => Ok(Some(None)),
+        Some(o) if TRIAL_OUTCOMES.contains(&o) => Ok(Some(Some(o.to_string()))),
+        Some(_) => Err(AppError::bad_request("trial_outcome must be keep, again, discard or skipped")),
+    }
 }
 
 async fn validate_mp(state: &AppState, user: &AuthUser, input: &MealPlanInput) -> AppResult<(String, Option<String>)> {
@@ -130,6 +155,7 @@ async fn load_mp_entry(state: &AppState, household: &str, id: &str) -> AppResult
 
 pub async fn create_meal_plan(State(state): State<AppState>, user: AuthUser, Json(input): Json<MealPlanInput>) -> AppResult<Response> {
     let (date, recipe_id) = validate_mp(&state, &user, &input).await?;
+    let outcome = trial_outcome_change(&input)?.flatten();
     let id = id_or_new(input.id.as_deref())?;
     if let Some(row) = sqlx::query("SELECT household_id FROM meal_plan WHERE id = $1").bind(&id).fetch_optional(&state.db.pool).await? {
         if row.s("household_id") == user.household_id {
@@ -139,8 +165,8 @@ pub async fn create_meal_plan(State(state): State<AppState>, user: AuthUser, Jso
     }
     let ts = now();
     sqlx::query(
-        "INSERT INTO meal_plan (id, household_id, date, meal, recipe_id, title, note, servings, created_by, created_at, updated_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)",
+        "INSERT INTO meal_plan (id, household_id, date, meal, recipe_id, title, note, servings, created_by, created_at, updated_at, \
+         trial_outcome, trial_resolved_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10, $11, $12)",
     )
     .bind(&id)
     .bind(&user.household_id)
@@ -152,6 +178,8 @@ pub async fn create_meal_plan(State(state): State<AppState>, user: AuthUser, Jso
     .bind(input.servings.filter(|s| *s > 0.0))
     .bind(&user.id)
     .bind(&ts)
+    .bind(outcome.clone())
+    .bind(outcome.is_some().then(|| ts.clone()))
     .execute(&state.db.pool)
     .await?;
     Ok((StatusCode::CREATED, Json(load_mp_entry(&state, &user.household_id, &id).await?)).into_response())
@@ -164,8 +192,14 @@ pub async fn update_meal_plan(
     Json(input): Json<MealPlanInput>,
 ) -> AppResult<Json<MealPlanEntry>> {
     let (date, recipe_id) = validate_mp(&state, &user, &input).await?;
+    let outcome = trial_outcome_change(&input)?;
+    let ts = now();
+    // The answer time is set when the answer changes (kept on unrelated edits).
     let res = sqlx::query(
-        "UPDATE meal_plan SET date = $1, meal = $2, recipe_id = $3, title = $4, note = $5, servings = $6, updated_at = $7 \
+        "UPDATE meal_plan SET date = $1, meal = $2, recipe_id = $3, title = $4, note = $5, servings = $6, updated_at = $7, \
+         trial_resolved_at = CASE WHEN $10 = 0 OR COALESCE(trial_outcome, '') = COALESCE($11, '') THEN trial_resolved_at \
+         WHEN $11 IS NULL THEN NULL ELSE $7 END, \
+         trial_outcome = CASE WHEN $10 = 0 THEN trial_outcome ELSE $11 END \
          WHERE id = $8 AND household_id = $9",
     )
     .bind(&date)
@@ -174,9 +208,11 @@ pub async fn update_meal_plan(
     .bind(input.title.map(|t| t.trim().to_string()).filter(|t| !t.is_empty()))
     .bind(input.note.map(|t| t.trim().to_string()).filter(|t| !t.is_empty()))
     .bind(input.servings.filter(|s| *s > 0.0))
-    .bind(now())
+    .bind(&ts)
     .bind(&id)
     .bind(&user.household_id)
+    .bind(outcome.is_some() as i64)
+    .bind(outcome.flatten())
     .execute(&state.db.pool)
     .await?;
     if res.rows_affected() == 0 {

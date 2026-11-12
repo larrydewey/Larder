@@ -1,11 +1,11 @@
-//! Recipe endpoints: list/search, CRUD, favorites, images, tags, parsing.
+//! Recipe endpoints: list/search, CRUD, favorites, trial verdicts, images, tags, parsing.
 
 use axum::body::Body;
 use axum::extract::{Multipart, Path, Query, RawQuery, State};
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use larder_core::{Ingredient, RecipeData};
+use larder_core::{Ingredient, RecipeData, RecipeStatus, TrialState};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -13,7 +13,7 @@ use crate::auth::AuthUser;
 use crate::db::{now, RowExt};
 use crate::error::{AppError, AppResult};
 use crate::images::ImageSize;
-use crate::recipes::{self, InsertOpts, Recipe, FAV_EXPR, RECIPE_COLS};
+use crate::recipes::{self, InsertOpts, Recipe, Verdict, FAV_EXPR, RECIPE_COLS};
 use crate::state::AppState;
 
 #[derive(Debug, Default)]
@@ -22,13 +22,19 @@ struct ListParams {
     tags: Vec<String>,
     categories: Vec<String>,
     favorites: bool,
+    /// `None` = all statuses; see [`parse_list_params`] for the default.
+    status: Option<RecipeStatus>,
     sort: String,
     page: i64,
     per_page: i64,
 }
 
-fn parse_list_params(raw: Option<&str>) -> ListParams {
+/// Parses the list query. Without `status`, a plain listing shows only the
+/// cookbook (trial recipes have their own list) while a search (`q`) looks
+/// at every recipe; `status=trial|cookbook|all` overrides that.
+fn parse_list_params(raw: Option<&str>) -> AppResult<ListParams> {
     let mut p = ListParams { sort: "name".into(), page: 1, per_page: 50, ..Default::default() };
+    let mut status: Option<String> = None;
     for (k, v) in url::form_urlencoded::parse(raw.unwrap_or("").as_bytes()) {
         let v = v.trim().to_string();
         match k.as_ref() {
@@ -36,17 +42,24 @@ fn parse_list_params(raw: Option<&str>) -> ListParams {
             "tag" | "tags" if !v.is_empty() => p.tags.push(v),
             "category" | "categories" if !v.is_empty() => p.categories.push(v),
             "favorites" => p.favorites = matches!(v.as_str(), "true" | "1" | "yes"),
+            "status" if !v.is_empty() => status = Some(v),
             "sort" if !v.is_empty() => p.sort = v,
             "page" => p.page = v.parse().unwrap_or(1).max(1),
             "per_page" => p.per_page = v.parse().unwrap_or(50).clamp(1, 500),
             _ => {}
         }
     }
-    p
+    p.status = match status.as_deref() {
+        Some("all") => None,
+        Some(s) => Some(RecipeStatus::parse(s).ok_or_else(|| AppError::bad_request("status must be cookbook, trial or all"))?),
+        None if p.q.is_some() => None,
+        None => Some(RecipeStatus::Cookbook),
+    };
+    Ok(p)
 }
 
 pub async fn list(State(state): State<AppState>, user: AuthUser, RawQuery(raw): RawQuery) -> AppResult<Json<Value>> {
-    let p = parse_list_params(raw.as_deref());
+    let p = parse_list_params(raw.as_deref())?;
     // $1 = user id (favorites), $2 = household; further params are appended.
     let mut binds: Vec<String> = vec![user.id.clone(), user.household_id.clone()];
     let mut wh = vec!["r.household_id = $2".to_string()];
@@ -67,6 +80,10 @@ pub async fn list(State(state): State<AppState>, user: AuthUser, RawQuery(raw): 
     }
     if p.favorites {
         wh.push("EXISTS (SELECT 1 FROM favorites f2 WHERE f2.recipe_id = r.id AND f2.user_id = $1)".into());
+    }
+    if let Some(status) = p.status {
+        binds.push(status.as_str().to_string());
+        wh.push(format!("r.status = ${}", binds.len()));
     }
     let order = match p.sort.as_str() {
         "-name" => "r.name_lower DESC",
@@ -103,13 +120,22 @@ pub async fn list(State(state): State<AppState>, user: AuthUser, RawQuery(raw): 
     Ok(Json(json!({ "items": items, "total": total, "page": p.page, "per_page": p.per_page })))
 }
 
-/// Request body for create/update: RecipeData plus optional id/version.
+/// Request body for create/update: RecipeData plus optional id/version and status.
 #[derive(Deserialize)]
 pub struct RecipeInput {
     #[serde(default)]
     id: Option<String>,
     #[serde(default)]
     version: Option<i64>,
+    /// Create: defaults to `cookbook`. Update: omitted leaves it unchanged.
+    #[serde(default)]
+    status: Option<RecipeStatus>,
+    /// Create only (e.g. moving standalone data to a server); updates ignore
+    /// these, they change through `POST /recipes/{id}/tried`.
+    #[serde(default)]
+    tried_count: Option<i64>,
+    #[serde(default)]
+    last_tried_at: Option<String>,
     #[serde(flatten)]
     data: RecipeData,
 }
@@ -120,7 +146,17 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(input): 
         &user.household_id,
         &user.id,
         input.data,
-        InsertOpts { id: input.id, created_by: Some(&user.id), created_at: None, image_id: None },
+        InsertOpts {
+            id: input.id,
+            created_by: Some(&user.id),
+            created_at: None,
+            image_id: None,
+            trial: TrialState {
+                status: input.status.unwrap_or_default(),
+                tried_count: input.tried_count.unwrap_or(0),
+                last_tried_at: input.last_tried_at,
+            },
+        },
     )
     .await?;
     let status = if created { StatusCode::CREATED } else { StatusCode::OK };
@@ -137,7 +173,7 @@ pub async fn update(
     Path(id): Path<String>,
     Json(input): Json<RecipeInput>,
 ) -> AppResult<Json<Recipe>> {
-    Ok(Json(recipes::update(&state, &user.household_id, &user.id, &id, input.data, input.version).await?))
+    Ok(Json(recipes::update(&state, &user.household_id, &user.id, &id, input.data, input.status, input.version).await?))
 }
 
 pub async fn delete(State(state): State<AppState>, user: AuthUser, Path(id): Path<String>) -> AppResult<StatusCode> {
@@ -162,10 +198,63 @@ pub async fn duplicate(State(state): State<AppState>, user: AuthUser, Path(id): 
         &user.household_id,
         &user.id,
         data,
-        InsertOpts { id: None, created_by: Some(&user.id), created_at: None, image_id },
+        // The copy starts its own trial history.
+        InsertOpts { id: None, created_by: Some(&user.id), created_at: None, image_id, trial: TrialState::new(src.trial.status) },
     )
     .await?;
     Ok((StatusCode::CREATED, Json(recipe)))
+}
+
+#[derive(Deserialize)]
+pub struct TriedReq {
+    /// `keep` (move to the cookbook) or `again` (stay on trial).
+    outcome: String,
+    /// When it was made (RFC 3339); defaults to now. Also makes the request
+    /// idempotent: a replay with the same value changes nothing.
+    #[serde(default)]
+    tried_at: Option<String>,
+    /// The cook's local date for the note line (`YYYY-MM-DD`); defaults to the UTC date of `tried_at`.
+    #[serde(default)]
+    date: Option<String>,
+    /// 1-5 stars; omitted or null keeps the current rating.
+    #[serde(default)]
+    rating: Option<i64>,
+    /// Appended to the notes as a dated line.
+    #[serde(default)]
+    note: Option<String>,
+}
+
+/// `POST /recipes/{id}/tried`: "I made this", with the household's verdict.
+pub async fn tried(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Path(id): Path<String>,
+    Json(req): Json<TriedReq>,
+) -> AppResult<Json<Recipe>> {
+    let keep = match req.outcome.trim() {
+        "keep" => true,
+        "again" => false,
+        _ => return Err(AppError::bad_request("outcome must be keep or again")),
+    };
+    let tried_at = match req.tried_at.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(t) => {
+            larder_core::trial::normalize_timestamp(t).ok_or_else(|| AppError::bad_request("tried_at must be an RFC 3339 timestamp"))?
+        }
+        None => now(),
+    };
+    let date = match req.date.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(d) => chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").map_err(|_| AppError::bad_request("date must be YYYY-MM-DD"))?,
+        None => chrono::DateTime::parse_from_rfc3339(&tried_at).map(|t| t.date_naive()).unwrap_or_default(),
+    };
+    if req.rating.is_some_and(|r| !(1..=5).contains(&r)) {
+        return Err(AppError::bad_request("rating must be 1-5"));
+    }
+    let note = req.note.unwrap_or_default();
+    if note.chars().count() > 2000 {
+        return Err(AppError::bad_request("note is too long"));
+    }
+    let verdict = Verdict { keep, tried_at, rating: req.rating, note_line: larder_core::trial::note_line(date, &note) };
+    Ok(Json(recipes::record_tried(&state, &user.household_id, &user.id, &id, verdict).await?))
 }
 
 pub async fn favorite(State(state): State<AppState>, user: AuthUser, Path(id): Path<String>) -> AppResult<StatusCode> {
@@ -297,7 +386,7 @@ async fn rewrite_tag(state: &AppState, user: &AuthUser, kind: &str, from: &str, 
             }
         }
         *list = out;
-        recipes::update(state, &user.household_id, &user.id, &id, data, None).await?;
+        recipes::update(state, &user.household_id, &user.id, &id, data, None, None).await?;
     }
     Ok(())
 }
@@ -399,7 +488,7 @@ pub async fn organize(State(state): State<AppState>, user: AuthUser, Json(req): 
             "ingredients_changed": ingredients_changed,
         }));
         if !req.dry_run {
-            recipes::update(&state, &user.household_id, &user.id, &r.id, data, None).await?;
+            recipes::update(&state, &user.household_id, &user.id, &r.id, data, None, None).await?;
         }
     }
     Ok(Json(json!({
