@@ -9,6 +9,7 @@ import '../models/meal_plan.dart';
 import '../models/organize.dart';
 import '../models/recipe.dart';
 import '../models/shopping.dart';
+import '../models/trial.dart';
 import '../standalone/standalone.dart';
 import 'app_mode.dart';
 import 'outbox_op.dart';
@@ -26,6 +27,10 @@ abstract class RecipeRepository {
   Future<OpOutcome> save(Recipe recipe, {required bool isNew, bool force = false});
   Future<OpOutcome> delete(Recipe recipe);
   Future<OpOutcome> setFavorite(Recipe recipe, bool favorite);
+
+  /// "I made this": counts the recipe as made and applies the verdict
+  /// (rating, note line, "Keep it" moves it to the cookbook). Works offline.
+  Future<OpOutcome> recordTried(Recipe recipe, TrialVerdict verdict);
   Future<Recipe> duplicate(String id);
 
   /// Replaces the recipe photo with [bytes].
@@ -83,9 +88,12 @@ class ImportPreview {
   final String? imagePath;
 }
 
+/// Single-recipe imports (URL, text, photo) default to the trial list; bulk
+/// imports to the cookbook, except that Larder backups keep each recipe's
+/// status. A `status` argument overrides that.
 abstract class ImportService {
   Future<ImportPreview> previewUrl(String url);
-  Future<Recipe> importUrl(String url);
+  Future<Recipe> importUrl(String url, {String status = RecipeStatus.trial});
   Future<ImportPreview> previewText(String text, {bool useLlm = false});
   Future<ImportPreview> previewImage(Uint8List bytes, String filename);
 
@@ -97,8 +105,15 @@ abstract class ImportService {
     required String source,
     bool skipDuplicates = true,
     bool categorize = true,
+    String? status,
   });
-  Stream<ImportJob> importMealie(String baseUrl, String token, {bool skipDuplicates = true, bool categorize = true});
+  Stream<ImportJob> importMealie(
+    String baseUrl,
+    String token, {
+    bool skipDuplicates = true,
+    bool categorize = true,
+    String? status,
+  });
   Future<List<ImportJob>> history();
 }
 

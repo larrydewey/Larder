@@ -51,6 +51,48 @@ const recipeJson = {
 };
 
 void main() {
+  test('Recipe trial fields round-trip; older payloads mean the cookbook', () {
+    final old = Recipe.fromJson(Map<String, dynamic>.from(recipeJson));
+    expect((old.status, old.isTrial, old.triedCount, old.lastTriedAt), (RecipeStatus.cookbook, false, 0, null));
+
+    final r = Recipe.fromJson({
+      ...recipeJson,
+      'status': 'trial',
+      'tried_count': 2,
+      'last_tried_at': '2026-11-12T18:30:00.000000Z',
+    });
+    expect((r.status, r.isTrial, r.triedCount), (RecipeStatus.trial, true, 2));
+    expect(r.lastTriedAt, DateTime.utc(2026, 11, 12, 18, 30));
+    final again = Recipe.fromJson(jsonDecode(jsonEncode(r.toJson())) as Map<String, dynamic>);
+    expect((again.status, again.triedCount, again.lastTriedAt), (r.status, r.triedCount, r.lastTriedAt));
+
+    // The status is editable; the counters only change through verdicts.
+    final input = r.toInput();
+    expect(input['status'], 'trial');
+    expect(input.containsKey('tried_count'), isFalse);
+    expect(input.containsKey('last_tried_at'), isFalse);
+    expect(Recipe.fromJson({...recipeJson, 'status': 'someday'}).status, RecipeStatus.cookbook);
+  });
+
+  test('MealPlanEntry trial answer round-trips', () {
+    final e = MealPlanEntry.fromJson({
+      'id': 'm1',
+      'date': '2026-11-10',
+      'meal': 'dinner',
+      'recipe_id': 'r1',
+      'recipe_status': 'trial',
+      'trial_outcome': 'skipped',
+      'trial_resolved_at': '2026-11-12T09:00:00.000000Z',
+    });
+    expect((e.recipeStatus, e.trialOutcome), ('trial', 'skipped'));
+    expect(e.trialResolvedAt, DateTime.utc(2026, 11, 12, 9));
+    final again = MealPlanEntry.fromJson(jsonDecode(jsonEncode(e.toJson())) as Map<String, dynamic>);
+    expect((again.trialOutcome, again.trialResolvedAt), (e.trialOutcome, e.trialResolvedAt));
+    expect(e.toInput()['trial_outcome'], 'skipped');
+    // Editing other fields keeps the answer.
+    expect(e.copyWith(note: 'leftovers').trialOutcome, 'skipped');
+  });
+
   test('Recipe round-trip', () {
     final r = Recipe.fromJson(Map<String, dynamic>.from(recipeJson));
     expect(r.name, 'Classic Pancakes');

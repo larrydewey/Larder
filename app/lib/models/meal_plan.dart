@@ -27,6 +27,9 @@ class MealPlanEntry {
     this.servings,
     this.createdBy,
     this.updatedAt,
+    this.recipeStatus,
+    this.trialOutcome,
+    this.trialResolvedAt,
   });
 
   final String id;
@@ -43,6 +46,14 @@ class MealPlanEntry {
   final String? createdBy;
   final DateTime? updatedAt;
 
+  /// The recipe's status as the server last reported it (read-only).
+  final String? recipeStatus;
+
+  /// How "Did you make it?" was answered for this entry ([TrialOutcome]);
+  /// null while unanswered. Asked once per entry.
+  final String? trialOutcome;
+  final DateTime? trialResolvedAt;
+
   String get displayTitle => recipeName ?? title ?? '';
 
   factory MealPlanEntry.fromJson(Json j) => MealPlanEntry(
@@ -57,6 +68,9 @@ class MealPlanEntry {
     servings: asDouble(j['servings']),
     createdBy: asString(j['created_by']),
     updatedAt: asDate(j['updated_at']),
+    recipeStatus: asString(j['recipe_status']),
+    trialOutcome: asString(j['trial_outcome']),
+    trialResolvedAt: asDate(j['trial_resolved_at']),
   );
 
   Json toJson() => {
@@ -71,6 +85,9 @@ class MealPlanEntry {
     'servings': servings,
     'created_by': createdBy,
     'updated_at': updatedAt?.toUtc().toIso8601String(),
+    'recipe_status': recipeStatus,
+    'trial_outcome': trialOutcome,
+    'trial_resolved_at': trialResolvedAt?.toUtc().toIso8601String(),
   };
 
   /// Body for POST/PUT /api/mealplan.
@@ -82,9 +99,19 @@ class MealPlanEntry {
     'title': title,
     'note': note,
     'servings': jsonNum(servings),
+    // Omitted = unchanged on the server.
+    if (trialOutcome != null) 'trial_outcome': trialOutcome,
   };
 
-  MealPlanEntry copyWith({String? date, String? meal, String? note, double? servings, String? title}) => MealPlanEntry(
+  MealPlanEntry copyWith({
+    String? date,
+    String? meal,
+    String? note,
+    double? servings,
+    String? title,
+    String? trialOutcome,
+    DateTime? trialResolvedAt,
+  }) => MealPlanEntry(
     id: id,
     date: date ?? this.date,
     meal: meal ?? this.meal,
@@ -96,5 +123,8 @@ class MealPlanEntry {
     servings: servings ?? this.servings,
     createdBy: createdBy,
     updatedAt: DateTime.now().toUtc(),
+    recipeStatus: recipeStatus,
+    trialOutcome: trialOutcome ?? this.trialOutcome,
+    trialResolvedAt: trialResolvedAt ?? this.trialResolvedAt,
   );
 }

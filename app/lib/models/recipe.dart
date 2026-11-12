@@ -101,6 +101,16 @@ class Instruction {
 
 String? _nullIfEmpty(String? s) => (s == null || s.trim().isEmpty) ? null : s;
 
+/// Where a recipe lives: the main cookbook, or the trial list of recipes the
+/// household wants to try before they join the cookbook.
+abstract final class RecipeStatus {
+  static const cookbook = 'cookbook';
+  static const trial = 'trial';
+
+  /// Unknown values (and null) mean the cookbook.
+  static String parse(Object? v) => asString(v)?.trim().toLowerCase() == trial ? trial : cookbook;
+}
+
 class Recipe {
   const Recipe({
     required this.id,
@@ -128,6 +138,9 @@ class Recipe {
     this.createdAt,
     this.updatedAt,
     this.version,
+    this.status = RecipeStatus.cookbook,
+    this.triedCount = 0,
+    this.lastTriedAt,
     this.localImages = const {},
     this.searchText,
   });
@@ -157,6 +170,15 @@ class Recipe {
   final DateTime? createdAt;
   final DateTime? updatedAt;
   final int? version;
+
+  /// [RecipeStatus.cookbook] or [RecipeStatus.trial] (household-wide).
+  final String status;
+
+  /// How often the household said "I made this" (changed only by verdicts).
+  final int triedCount;
+  final DateTime? lastTriedAt;
+
+  bool get isTrial => status == RecipeStatus.trial;
 
   /// On-device processed images (`thumb`/`medium`/`full` -> file path).
   /// Local-only: never sent to the server.
@@ -207,6 +229,9 @@ class Recipe {
     createdAt: asDate(j['created_at']),
     updatedAt: asDate(j['updated_at']),
     version: asInt(j['version']),
+    status: RecipeStatus.parse(j['status']),
+    triedCount: asInt(j['tried_count']) ?? 0,
+    lastTriedAt: asDate(j['last_tried_at']),
     localImages: asStringMap(j['local_images']),
     searchText: asString(j['search_text']),
   );
@@ -238,12 +263,16 @@ class Recipe {
     'created_at': createdAt?.toUtc().toIso8601String(),
     'updated_at': updatedAt?.toUtc().toIso8601String(),
     'version': version,
+    'status': status,
+    'tried_count': triedCount,
+    'last_tried_at': lastTriedAt?.toUtc().toIso8601String(),
     if (localImages.isNotEmpty) 'local_images': localImages,
     if (searchText != null) 'search_text': searchText,
   };
 
   /// `RecipeInput` for POST/PUT. [includeVersion] enables optimistic
-  /// concurrency on update.
+  /// concurrency on update. The trial counters are not part of it: the
+  /// server only changes them through verdicts (`POST /recipes/{id}/tried`).
   Json toInput({bool includeId = true, bool includeVersion = true}) => {
     if (includeId) 'id': id,
     'name': name,
@@ -262,6 +291,7 @@ class Recipe {
     'tags': tags,
     'categories': categories,
     'nutrition': nutrition,
+    'status': status,
     if (includeVersion && version != null) 'version': version,
   };
 
@@ -293,6 +323,9 @@ class Recipe {
     String? householdId,
     String? createdBy,
     DateTime? createdAt,
+    String? status,
+    int? triedCount,
+    DateTime? Function()? lastTriedAt,
   }) => Recipe(
     id: id ?? this.id,
     householdId: householdId ?? this.householdId,
@@ -319,6 +352,9 @@ class Recipe {
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
     version: version != null ? version() : this.version,
+    status: status ?? this.status,
+    triedCount: triedCount ?? this.triedCount,
+    lastTriedAt: lastTriedAt != null ? lastTriedAt() : this.lastTriedAt,
     localImages: localImages ?? this.localImages,
     searchText: searchText != null ? searchText() : this.searchText,
   );

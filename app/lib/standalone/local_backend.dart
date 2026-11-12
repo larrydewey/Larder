@@ -19,6 +19,7 @@ import '../models/meal_plan.dart';
 import '../models/organize.dart';
 import '../models/recipe.dart';
 import '../models/shopping.dart';
+import '../models/trial.dart';
 import '../util/categories.dart';
 import '../util/text_fold.dart';
 
@@ -67,7 +68,8 @@ class LocalRecipeRepository implements RecipeRepository {
   LocalStore get store => ref.read(localStoreProvider);
 
   /// Normalises [recipe] with the engine (parses changed ingredient lines,
-  /// computes slug + search text) and stores it.
+  /// computes slug + search text) and stores it. Like the server, edits keep
+  /// the trial counters of the stored recipe (only verdicts change them).
   Future<Recipe> normalizeAndStore(Recipe recipe, {Recipe? existing}) async {
     final norm = await engine.normalizeRecipe(recipe.toInput(includeVersion: false));
     final now = DateTime.now().toUtc();
@@ -81,6 +83,8 @@ class LocalRecipeRepository implements RecipeRepository {
       'created_at': (existing?.createdAt ?? recipe.createdAt ?? now).toIso8601String(),
       'updated_at': now.toIso8601String(),
       'version': (existing?.version ?? 0) + 1,
+      'tried_count': existing?.triedCount ?? recipe.triedCount,
+      'last_tried_at': (existing == null ? recipe.lastTriedAt : existing.lastTriedAt)?.toUtc().toIso8601String(),
       'local_images': existing?.localImages ?? recipe.localImages,
     });
     await store.putRecipe(merged);
@@ -113,6 +117,18 @@ class LocalRecipeRepository implements RecipeRepository {
   }
 
   @override
+  Future<OpOutcome> recordTried(Recipe recipe, TrialVerdict verdict) async {
+    final current = await store.recipe(recipe.id);
+    if (current == null) return const OpOutcome(OutcomeKind.rejected, message: 'Recipe not found');
+    final updated = applyTrialVerdict(
+      current,
+      verdict,
+    ).copyWith(updatedAt: DateTime.now().toUtc(), version: () => (current.version ?? 0) + 1);
+    await store.putRecipe(updated);
+    return OpOutcome(OutcomeKind.applied, data: updated.toJson());
+  }
+
+  @override
   Future<Recipe> duplicate(String id) async {
     final src = await refresh(id);
     final newRecipeId = newId();
@@ -133,6 +149,9 @@ class LocalRecipeRepository implements RecipeRepository {
       localImages: images,
       createdAt: DateTime.now().toUtc(),
       version: () => null,
+      // The copy starts its own trial history.
+      triedCount: 0,
+      lastTriedAt: () => null,
     );
     return normalizeAndStore(copy);
   }
@@ -261,13 +280,27 @@ class LocalRecipeRepository implements RecipeRepository {
           };
   }
 
-  /// Saves an engine `ImportedRecipe` as a new recipe (new id).
-  Future<Recipe> saveImported(Json imported, {bool categorize = true}) async {
+  /// Saves an engine `ImportedRecipe` as a new recipe (new id). [status]
+  /// (the import screen's choice) wins; otherwise the status the source
+  /// recorded (Larder backups), else [defaultStatus]. Same rule as the
+  /// server's `ImportedRecipe::trial_state`.
+  Future<Recipe> saveImported(
+    Json imported, {
+    bool categorize = true,
+    String? status,
+    String defaultStatus = RecipeStatus.cookbook,
+  }) async {
     var data = asJson(imported['data']);
     if (categorize) data = await autoCategorize(data);
     final createdAt = asDate(imported['created_at']);
-    final draft = Recipe.fromJson({...data, 'id': newId()})
-        .copyWith(isFavorite: asBool(imported['favorite']), createdAt: createdAt);
+    final trial = imported['trial'] is Map ? asJson(imported['trial']) : null;
+    final draft = Recipe.fromJson({...data, 'id': newId()}).copyWith(
+      isFavorite: asBool(imported['favorite']),
+      createdAt: createdAt,
+      status: status ?? (trial == null ? defaultStatus : RecipeStatus.parse(trial['status'])),
+      triedCount: trial == null ? 0 : (asInt(trial['tried_count']) ?? 0).clamp(0, 100000),
+      lastTriedAt: () => trial == null ? null : asDate(trial['last_tried_at'])?.toUtc(),
+    );
     var saved = await normalizeAndStore(draft);
     final image = asString(imported['image_path']);
     if (image != null && File(image).existsSync()) {
@@ -456,9 +489,9 @@ class LocalImportService implements ImportService {
   }
 
   @override
-  Future<Recipe> importUrl(String url) async {
+  Future<Recipe> importUrl(String url, {String status = RecipeStatus.trial}) async {
     final imported = await engine.importUrl(url, (await paths.tmp()).path);
-    return recipes.saveImported(imported);
+    return recipes.saveImported(imported, status: status);
   }
 
   @override
@@ -516,6 +549,7 @@ class LocalImportService implements ImportService {
     Future<Json> Function(Object? item) resolve, {
     required bool skipDuplicates,
     required bool categorize,
+    String? status,
   }) async* {
     final id = newId();
     final created = DateTime.now().toUtc();
@@ -566,7 +600,7 @@ class LocalImportService implements ImportService {
           final img = asString(imported0['image_path']);
           if (img != null) unawaited(File(img).delete().then((_) {}, onError: (_) {}));
         } else {
-          final r = await recipes.saveImported(imported0, categorize: categorize);
+          final r = await recipes.saveImported(imported0, categorize: categorize, status: status);
           existing.add(r.id, name: r.name, sourceUrl: _cleanUrl(r.sourceUrl));
           ids.add(r.id);
           imported++;
@@ -598,6 +632,7 @@ class LocalImportService implements ImportService {
     required String source,
     bool skipDuplicates = true,
     bool categorize = true,
+    String? status,
   }) {
     var detected = source;
     String? tmpPath;
@@ -620,18 +655,25 @@ class LocalImportService implements ImportService {
       (item) async => asJson(item),
       skipDuplicates: skipDuplicates,
       categorize: categorize,
+      status: status,
     ).map((j) => j.source == detected ? j : ImportJob.fromJson({...j.toJson(), 'source': detected}));
   }
 
   @override
-  Stream<ImportJob> importMealie(String baseUrl, String token, {bool skipDuplicates = true, bool categorize = true}) =>
-      _saveAll(
-        'mealie',
-        (errors) async => await engine.mealieList(baseUrl, token),
-        (slug) async => engine.mealieFetch(baseUrl, token, slug as String, (await paths.tmp()).path),
-        skipDuplicates: skipDuplicates,
-        categorize: categorize,
-      );
+  Stream<ImportJob> importMealie(
+    String baseUrl,
+    String token, {
+    bool skipDuplicates = true,
+    bool categorize = true,
+    String? status,
+  }) => _saveAll(
+    'mealie',
+    (errors) async => await engine.mealieList(baseUrl, token),
+    (slug) async => engine.mealieFetch(baseUrl, token, slug as String, (await paths.tmp()).path),
+    skipDuplicates: skipDuplicates,
+    categorize: categorize,
+    status: status,
+  );
 
   Future<void> _remember(ImportJob job) async {
     final list = await history();
@@ -666,9 +708,10 @@ class LocalCookbookService implements CookbookService {
     return path != null && File(path).existsSync() ? path : null;
   }
 
+  /// Trial recipes never go into the printed book (the engine also skips them).
   @override
   Future<Uint8List> renderCookbook(CookbookOptions options) async {
-    var all = await store.recipes();
+    var all = (await store.recipes()).where((r) => !r.isTrial).toList();
     final ids = options.recipeIds;
     if (ids != null) {
       final wanted = ids.toSet();
@@ -677,7 +720,8 @@ class LocalCookbookService implements CookbookService {
     final opts = options.toJson()..remove('recipe_ids');
     final out = await paths.tmpFile('cookbook.pdf');
     final res = await engine.renderCookbook(opts, [
-      for (final r in all) {'id': r.id, 'data': r.toInput(includeVersion: false), 'image_path': _image(r)},
+      for (final r in all)
+        {'id': r.id, 'data': r.toInput(includeVersion: false), 'image_path': _image(r), 'status': r.status},
     ], out);
     return _readAndDelete(asStr(res['path'], out));
   }
@@ -693,6 +737,9 @@ class LocalCookbookService implements CookbookService {
           'data': r.toInput(includeVersion: false),
           'image_path': _image(r),
           'favorite': r.isFavorite,
+          'status': r.status,
+          'tried_count': r.triedCount,
+          'last_tried_at': r.lastTriedAt?.toUtc().toIso8601String(),
           'created_at': r.createdAt?.toUtc().toIso8601String(),
           'updated_at': r.updatedAt?.toUtc().toIso8601String(),
         },
