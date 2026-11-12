@@ -9,6 +9,7 @@ import '../../models/recipe.dart';
 import '../../util/fractions.dart';
 import '../../widgets/recipe_image.dart';
 import '../../widgets/snack.dart';
+import '../../widgets/trial_badge.dart';
 import '../recipes/recipe_query.dart';
 
 /// Bottom sheet to add or edit a meal plan entry (recipe or free text).
@@ -79,6 +80,8 @@ class _MealEntrySheetState extends ConsumerState<_MealEntrySheet> {
         servings: parseQuantity(_servings.text),
         createdBy: e?.createdBy,
         updatedAt: DateTime.now().toUtc(),
+        trialOutcome: e?.trialOutcome,
+        trialResolvedAt: e?.trialResolvedAt,
       ),
     );
   }
@@ -87,7 +90,8 @@ class _MealEntrySheetState extends ConsumerState<_MealEntrySheet> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final recipes = ref.watch(recipesProvider).value ?? const <Recipe>[];
-    final matches = applyRecipeQuery(recipes, RecipeQuery(text: _search.text)).take(30).toList();
+    // Trial recipes can be planned like any other.
+    final matches = applyRecipeQuery(recipes, RecipeQuery(text: _search.text), includeTrial: true).take(30).toList();
     final selectedId = _recipe?.id ?? widget.entry?.recipeId;
     return Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
@@ -163,6 +167,9 @@ class _MealEntrySheetState extends ConsumerState<_MealEntrySheet> {
                               child: SizedBox(width: 44, height: 44, child: RecipeImage.of(r, iconSize: 18)),
                             ),
                             title: Text(r.name),
+                            subtitle: r.isTrial
+                                ? const Align(alignment: Alignment.centerLeft, child: TrialBadge(dense: true))
+                                : null,
                             trailing: selected ? const Icon(Icons.check_circle_rounded) : null,
                             onTap: () => setState(() {
                               _recipe = r;

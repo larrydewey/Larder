@@ -21,12 +21,17 @@ import '../../widgets/rating.dart';
 import '../../widgets/recipe_image.dart';
 import '../../widgets/snack.dart';
 import '../../widgets/states.dart';
+import '../trial/trial_bar.dart';
 import 'ingredients_view.dart';
 import 'recipe_actions.dart';
 
 class RecipeDetailScreen extends ConsumerStatefulWidget {
-  const RecipeDetailScreen({super.key, required this.id});
+  const RecipeDetailScreen({super.key, required this.id, this.base = '/recipes'});
   final String id;
+
+  /// The list this page belongs to (`/recipes` or `/trial`); cook mode,
+  /// the editor and "back" stay below it.
+  final String base;
 
   @override
   ConsumerState<RecipeDetailScreen> createState() => _RecipeDetailScreenState();
@@ -132,7 +137,7 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
     return Scaffold(
       floatingActionButton: FloatingActionButton.extended(
         heroTag: 'cook',
-        onPressed: () => context.push('/recipes/${r.id}/cook?servings=$servings'),
+        onPressed: () => context.push('${widget.base}/${r.id}/cook?servings=$servings'),
         icon: const Icon(Icons.play_arrow_rounded),
         label: const Text('Cook'),
       ),
@@ -159,7 +164,7 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
               _CircleAction(
                 tooltip: 'Edit',
                 icon: Icons.edit_outlined,
-                onPressed: () => context.push('/recipes/${r.id}/edit'),
+                onPressed: () => context.push('${widget.base}/${r.id}/edit'),
               ),
               _menu(context, r, servings),
               const SizedBox(width: 4),
@@ -173,7 +178,10 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    _Header(recipe: r),
+                    _Header(
+                      recipe: r,
+                      belowTitle: r.isTrial ? TrialBar(recipe: r, onDiscarded: () => context.go(widget.base)) : null,
+                    ),
                     const SizedBox(height: 8),
                     if (wide)
                       Row(
@@ -276,7 +284,7 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
             await showAddToShoppingList(context, ref, r, servings: servings);
           case 'duplicate':
             final copy = await runOnline(() => repo.duplicate(r.id));
-            if (copy != null && context.mounted) context.go('/recipes/${copy.id}');
+            if (copy != null && context.mounted) context.go('${widget.base}/${copy.id}');
           case 'share':
             Uri? link;
             if (ref.read(publicSharingProvider)) {
@@ -322,7 +330,7 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
               message: '"${r.name}" will be removed for everyone in your household.',
             )) {
               unawaited(repo.delete(r).then((o) => reportOutcome(o, success: 'Recipe deleted')));
-              if (context.mounted) context.go('/recipes');
+              if (context.mounted) context.go(widget.base);
             }
         }
       },
@@ -367,8 +375,11 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.recipe});
+  const _Header({required this.recipe, this.belowTitle});
   final Recipe recipe;
+
+  /// Shown right under the name (the trial bar).
+  final Widget? belowTitle;
 
   @override
   Widget build(BuildContext context) {
@@ -404,6 +415,7 @@ class _Header extends StatelessWidget {
           ),
         const SizedBox(height: 4),
         SelectableText(r.name, style: theme.textTheme.displaySmall?.copyWith(height: 1.1)),
+        if (belowTitle != null) ...[const SizedBox(height: 10), belowTitle!],
         if (r.rating != null && r.rating! > 0) ...[const SizedBox(height: 8), StarRating(rating: r.rating)],
         if (r.description.trim().isNotEmpty) ...[
           const SizedBox(height: 12),

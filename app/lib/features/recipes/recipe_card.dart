@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../models/recipe.dart';
 import '../../util/timers.dart';
 import '../../widgets/recipe_image.dart';
+import '../../widgets/trial_badge.dart';
 
 class RecipeCard extends StatelessWidget {
   const RecipeCard({super.key, required this.recipe, required this.onTap});
@@ -75,6 +76,7 @@ class RecipeMetaRow extends StatelessWidget {
       runSpacing: 4,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
+        if (recipe.isTrial) const TrialBadge(dense: true),
         if (time != null)
           Row(
             mainAxisSize: MainAxisSize.min,

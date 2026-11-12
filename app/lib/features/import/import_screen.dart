@@ -11,6 +11,7 @@ import '../../api/api_exception.dart';
 import '../../data/backend.dart';
 import '../../data/preferences.dart';
 import '../../models/import_job.dart';
+import '../../models/recipe.dart';
 import '../../widgets/snack.dart';
 import '../../widgets/states.dart';
 
@@ -28,6 +29,51 @@ const importSources = {
 final importJobsProvider = FutureProvider.autoDispose<List<ImportJob>>(
   (ref) => ref.watch(importServiceProvider).history(),
 );
+
+/// Single-recipe imports (website, text, photo) go to the trial list unless
+/// this is switched off. Shared by those tabs.
+final _singleToTrialProvider = NotifierProvider<_SingleToTrial, bool>(_SingleToTrial.new);
+
+class _SingleToTrial extends Notifier<bool> {
+  @override
+  bool build() => true;
+  void set(bool v) => state = v;
+}
+
+/// The status chosen for single-recipe imports.
+String _singleStatus(WidgetRef ref) => ref.read(_singleToTrialProvider) ? RecipeStatus.trial : RecipeStatus.cookbook;
+
+/// The import screen's choice, for a single-recipe import.
+class _SingleTrialSwitch extends ConsumerWidget {
+  const _SingleTrialSwitch();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) => SwitchListTile(
+    key: const Key('import-to-trial'),
+    contentPadding: EdgeInsets.zero,
+    value: ref.watch(_singleToTrialProvider),
+    onChanged: (v) => ref.read(_singleToTrialProvider.notifier).set(v),
+    title: const Text('Add to Trial'),
+    subtitle: const Text('Try it before it joins your cookbook'),
+    secondary: const Icon(Icons.science_outlined),
+  );
+}
+
+/// The import screen's choice for a bulk import: off keeps the default.
+class _BulkTrialSwitch extends StatelessWidget {
+  const _BulkTrialSwitch({required this.value, required this.onChanged});
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) => SwitchListTile(
+    contentPadding: EdgeInsets.zero,
+    value: value,
+    onChanged: onChanged,
+    title: const Text('Add to Trial'),
+    subtitle: const Text('When off, recipes go to your cookbook (Larder backups keep each recipe\'s place)'),
+  );
+}
 
 class ImportScreen extends ConsumerStatefulWidget {
   const ImportScreen({super.key});
@@ -106,8 +152,15 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
   }
 }
 
-/// Opens the editor with an unsaved import preview.
-void openPreview(BuildContext context, ImportPreview preview) => context.push('/recipes/new', extra: preview);
+/// Opens the editor with an unsaved import preview, as [status] (the
+/// editor can still change it).
+void openPreview(BuildContext context, ImportPreview preview, {required String status}) => context.push(
+  status == RecipeStatus.trial ? '/trial/new' : '/recipes/new',
+  extra: ImportPreview(preview.recipe.copyWith(status: status), imagePath: preview.imagePath),
+);
+
+/// Where a saved recipe's page lives.
+String recipePath(Recipe r) => r.isTrial ? '/trial/${r.id}' : '/recipes/${r.id}';
 
 class _TabBody extends StatelessWidget {
   const _TabBody({required this.children});
@@ -178,14 +231,15 @@ class _UrlTabState extends ConsumerState<_UrlTab> with _Busy {
   void _go(bool save) {
     final url = _url.text.trim();
     if (url.isEmpty) return;
+    final status = _singleStatus(ref);
     run(() async {
       final imports = ref.read(importServiceProvider);
       if (save) {
-        final r = await imports.importUrl(url);
-        if (mounted) context.go('/recipes/${r.id}');
+        final r = await imports.importUrl(url, status: status);
+        if (mounted) context.go(recipePath(r));
       } else {
         final preview = await imports.previewUrl(url);
-        if (mounted) openPreview(context, preview);
+        if (mounted) openPreview(context, preview, status: status);
       }
     });
   }
@@ -202,7 +256,8 @@ class _UrlTabState extends ConsumerState<_UrlTab> with _Busy {
         decoration: const InputDecoration(labelText: 'Recipe URL', prefixIcon: Icon(Icons.link_rounded)),
         onSubmitted: (_) => _go(false),
       ),
-      const SizedBox(height: 16),
+      const _SingleTrialSwitch(),
+      const SizedBox(height: 8),
       Wrap(
         spacing: 12,
         runSpacing: 8,
@@ -239,9 +294,10 @@ class _TextTabState extends ConsumerState<_TextTab> with _Busy {
 
   void _go() {
     if (_text.text.trim().isEmpty) return;
+    final status = _singleStatus(ref);
     run(() async {
       final preview = await ref.read(importServiceProvider).previewText(_text.text, useLlm: widget.llm && _useLlm);
-      if (mounted) openPreview(context, preview);
+      if (mounted) openPreview(context, preview, status: status);
     });
   }
 
@@ -267,6 +323,7 @@ class _TextTabState extends ConsumerState<_TextTab> with _Busy {
           subtitle: const Text('Better results for messy text'),
           secondary: const Icon(Icons.auto_awesome_outlined),
         ),
+      const _SingleTrialSwitch(),
       const SizedBox(height: 12),
       Align(
         alignment: Alignment.centerLeft,
@@ -289,13 +346,14 @@ class _PhotoTab extends ConsumerStatefulWidget {
 
 class _PhotoTabState extends ConsumerState<_PhotoTab> with _Busy {
   void _pick(ImageSource source) => run(() async {
+    final status = _singleStatus(ref);
     final file = await ImagePicker().pickImage(source: source, maxWidth: 2400, maxHeight: 2400, imageQuality: 90);
     if (file == null) return;
     final bytes = await file.readAsBytes();
     final preview = await ref
         .read(importServiceProvider)
         .previewImage(bytes, file.name.isEmpty ? 'recipe.jpg' : file.name);
-    if (mounted) openPreview(context, preview);
+    if (mounted) openPreview(context, preview, status: status);
   });
 
   @override
@@ -304,6 +362,7 @@ class _PhotoTabState extends ConsumerState<_PhotoTab> with _Busy {
       const _Hint(
         'Take a photo of a recipe card or cookbook page. AI will read it and fill in a recipe for you to review.',
       ),
+      const _SingleTrialSwitch(),
       if (busy)
         const Padding(
           padding: EdgeInsets.all(24),
@@ -341,6 +400,7 @@ class _FileTabState extends ConsumerState<_FileTab> with _Busy {
   String _source = 'auto';
   bool _skipDuplicates = true;
   bool _categorize = true;
+  bool _trial = false;
 
   void _pick() => run(() async {
     final file = await FilePicker.pickFile();
@@ -349,7 +409,14 @@ class _FileTabState extends ConsumerState<_FileTab> with _Busy {
     widget.onJob(
       ref
           .read(importServiceProvider)
-          .importFile(bytes, file.name, source: _source, skipDuplicates: _skipDuplicates, categorize: _categorize),
+          .importFile(
+            bytes,
+            file.name,
+            source: _source,
+            skipDuplicates: _skipDuplicates,
+            categorize: _categorize,
+            status: _trial ? RecipeStatus.trial : null,
+          ),
     );
   });
 
@@ -376,6 +443,7 @@ class _FileTabState extends ConsumerState<_FileTab> with _Busy {
         title: const Text('Sort recipes into categories'),
         subtitle: const Text('Recipes without a category get a suggested one'),
       ),
+      _BulkTrialSwitch(value: _trial, onChanged: (v) => setState(() => _trial = v)),
       const SizedBox(height: 8),
       Align(
         alignment: Alignment.centerLeft,
@@ -402,6 +470,7 @@ class _MealieTabState extends ConsumerState<_MealieTab> with _Busy {
   final _token = TextEditingController();
   bool _skipDuplicates = true;
   bool _categorize = true;
+  bool _trial = false;
 
   @override
   void dispose() {
@@ -424,6 +493,7 @@ class _MealieTabState extends ConsumerState<_MealieTab> with _Busy {
               _token.text.trim(),
               skipDuplicates: _skipDuplicates,
               categorize: _categorize,
+              status: _trial ? RecipeStatus.trial : null,
             ),
       );
     });
@@ -464,6 +534,7 @@ class _MealieTabState extends ConsumerState<_MealieTab> with _Busy {
         title: const Text('Sort recipes into categories'),
         subtitle: const Text('Recipes without a category get a suggested one'),
       ),
+      _BulkTrialSwitch(value: _trial, onChanged: (v) => setState(() => _trial = v)),
       Align(
         alignment: Alignment.centerLeft,
         child: FilledButton.icon(

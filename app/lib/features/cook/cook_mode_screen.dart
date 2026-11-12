@@ -11,13 +11,21 @@ import '../../util/scaling.dart';
 import '../../util/timers.dart';
 import '../../widgets/states.dart';
 import '../recipes/ingredients_view.dart';
+import '../trial/trial_actions.dart';
+import '../trial/verdict_sheet.dart';
 import 'cook_timers.dart';
 
 /// Full-screen step-by-step cooking view.
+///
+/// Starting cook mode never counts as making a trial recipe. Leaving it asks
+/// "How did it go?"; dismissing that sheet means "Just looking".
 class CookModeScreen extends ConsumerStatefulWidget {
-  const CookModeScreen({super.key, required this.id, this.servings});
+  const CookModeScreen({super.key, required this.id, this.servings, this.base = '/recipes'});
   final String id;
   final double? servings;
+
+  /// The list the recipe was opened from (`/recipes` or `/trial`).
+  final String base;
 
   @override
   ConsumerState<CookModeScreen> createState() => _CookModeScreenState();
@@ -27,6 +35,9 @@ class _CookModeScreenState extends ConsumerState<CookModeScreen> {
   final _pages = PageController();
   int _page = 0;
   final Set<int> _checked = {};
+
+  /// Whether the trial question was asked already (it is asked once, on exit).
+  bool _asked = false;
 
   @override
   void initState() {
@@ -46,7 +57,25 @@ class _CookModeScreenState extends ConsumerState<CookModeScreen> {
     _pages.animateToPage(page, duration: const Duration(milliseconds: 280), curve: Curves.easeOutCubic);
   }
 
-  void _close() => context.canPop() ? context.pop() : context.go('/recipes/${widget.id}');
+  void _leave() => context.canPop() ? context.pop() : context.go('${widget.base}/${widget.id}');
+
+  /// Leaves cook mode; for a trial recipe, asks how it went first.
+  Future<void> _close() async {
+    final recipe = ref.read(recipeProvider(widget.id)).value;
+    if (recipe == null || !recipe.isTrial || _asked) return _leave();
+    setState(() => _asked = true);
+    final steps = recipe.instructions.isEmpty ? 1 : recipe.instructions.length;
+    final result = await showVerdictSheet(context, recipe, mode: VerdictMode.cookMode, finished: _page >= steps - 1);
+    if (!mounted) return;
+    if (result == null) return _leave(); // Just looking: nothing is recorded.
+    final done = applyVerdictResult(context, ref, recipe, result);
+    if (result.action == VerdictAction.discard) {
+      context.go(widget.base);
+    } else {
+      _leave();
+    }
+    await done;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -58,6 +87,17 @@ class _CookModeScreenState extends ConsumerState<CookModeScreen> {
     final count = steps.length;
     final theme = Theme.of(context);
 
+    return PopScope(
+      // System back on a trial recipe goes through the "How did it go?" sheet.
+      canPop: !recipe.isTrial || _asked,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _close();
+      },
+      child: _body(context, recipe, steps, count, theme),
+    );
+  }
+
+  Widget _body(BuildContext context, Recipe recipe, List<Instruction> steps, int count, ThemeData theme) {
     return CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.arrowRight): () => _goTo(_page + 1, count),

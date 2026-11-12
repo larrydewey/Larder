@@ -25,6 +25,7 @@ import 'features/setup/welcome_screen.dart';
 import 'features/shell/app_shell.dart';
 import 'features/shopping/shopping_list_screen.dart';
 import 'features/shopping/shopping_lists_screen.dart';
+import 'features/trial/trial_screen.dart';
 import 'models/recipe.dart';
 import 'widgets/snack.dart';
 
@@ -67,43 +68,11 @@ final routerProvider = Provider<GoRouter>((ref) {
         branches: [
           StatefulShellBranch(
             routes: [
-              GoRoute(
-                path: '/recipes',
-                builder: (_, _) => const RecipeListScreen(),
-                routes: [
-                  GoRoute(
-                    path: 'new',
-                    parentNavigatorKey: rootNavigatorKey,
-                    builder: (_, state) {
-                      final extra = state.extra;
-                      if (extra is ImportPreview) {
-                        return RecipeEditorScreen(draft: extra.recipe, draftImagePath: extra.imagePath);
-                      }
-                      return RecipeEditorScreen(draft: extra is Recipe ? extra : null);
-                    },
-                  ),
-                  GoRoute(
-                    path: ':id',
-                    builder: (_, state) => RecipeDetailScreen(id: state.pathParameters['id']!),
-                    routes: [
-                      GoRoute(
-                        path: 'cook',
-                        parentNavigatorKey: rootNavigatorKey,
-                        builder: (_, state) => CookModeScreen(
-                          id: state.pathParameters['id']!,
-                          servings: double.tryParse(state.uri.queryParameters['servings'] ?? ''),
-                        ),
-                      ),
-                      GoRoute(
-                        path: 'edit',
-                        parentNavigatorKey: rootNavigatorKey,
-                        builder: (_, state) => RecipeEditorScreen(id: state.pathParameters['id']),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
+              GoRoute(path: '/recipes', builder: (_, _) => const RecipeListScreen(), routes: _recipeRoutes('/recipes')),
             ],
+          ),
+          StatefulShellBranch(
+            routes: [GoRoute(path: '/trial', builder: (_, _) => const TrialScreen(), routes: _recipeRoutes('/trial'))],
           ),
           StatefulShellBranch(
             routes: [GoRoute(path: '/mealplan', builder: (_, _) => const MealPlanScreen())],
@@ -145,6 +114,46 @@ final routerProvider = Provider<GoRouter>((ref) {
   ref.onDispose(router.dispose);
   return router;
 });
+
+/// New / detail / cook / edit routes below a list ([base] is `/recipes` or
+/// `/trial`), so a recipe opened from the trial list stays in that tab.
+List<RouteBase> _recipeRoutes(String base) => [
+  GoRoute(
+    path: 'new',
+    parentNavigatorKey: rootNavigatorKey,
+    builder: (_, state) {
+      final extra = state.extra;
+      if (extra is ImportPreview) {
+        return RecipeEditorScreen(draft: extra.recipe, draftImagePath: extra.imagePath, base: base);
+      }
+      // A recipe started from the trial list is a recipe to try.
+      final draft = extra is Recipe
+          ? extra
+          : (base == '/trial' ? const Recipe(id: '', name: '', status: RecipeStatus.trial) : null);
+      return RecipeEditorScreen(draft: draft, base: base);
+    },
+  ),
+  GoRoute(
+    path: ':id',
+    builder: (_, state) => RecipeDetailScreen(id: state.pathParameters['id']!, base: base),
+    routes: [
+      GoRoute(
+        path: 'cook',
+        parentNavigatorKey: rootNavigatorKey,
+        builder: (_, state) => CookModeScreen(
+          id: state.pathParameters['id']!,
+          servings: double.tryParse(state.uri.queryParameters['servings'] ?? ''),
+          base: base,
+        ),
+      ),
+      GoRoute(
+        path: 'edit',
+        parentNavigatorKey: rootNavigatorKey,
+        builder: (_, state) => RecipeEditorScreen(id: state.pathParameters['id'], base: base),
+      ),
+    ],
+  ),
+];
 
 /// Route guard (pure, unit tested).
 String? appRedirect(AppMode mode, AuthStatus status, String location) {

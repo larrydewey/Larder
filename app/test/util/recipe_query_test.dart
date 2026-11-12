@@ -40,6 +40,20 @@ void main() {
     expect(applyRecipeQuery([r], const RecipeQuery(text: 'secret')), hasLength(1));
   });
 
+  test('trial recipes stay out of the list but show up in searches', () {
+    final all = [
+      ...recipes,
+      Recipe(id: 't', name: 'Miso Aubergine', tags: const ['dessert'], status: RecipeStatus.trial),
+    ];
+    List<String> q(RecipeQuery query, {bool? includeTrial}) =>
+        applyRecipeQuery(all, query, includeTrial: includeTrial).map((r) => r.id).toList();
+    expect(q(const RecipeQuery()), isNot(contains('t')));
+    expect(q(const RecipeQuery(tags: {'dessert'})), isNot(contains('t')));
+    expect(q(const RecipeQuery(text: 'aubergine')), ['t']);
+    expect(q(const RecipeQuery(), includeTrial: true), contains('t'));
+    expect(q(const RecipeQuery(text: 'aubergine'), includeTrial: false), isEmpty);
+  });
+
   test('filters and sort', () {
     expect(ids(const RecipeQuery(favoritesOnly: true)), ['1']);
     expect(ids(const RecipeQuery(tags: {'Dessert'}, sort: RecipeSort.nameDesc)), ['1', '3']);

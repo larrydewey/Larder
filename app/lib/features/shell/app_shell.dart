@@ -8,6 +8,7 @@ import '../../data/app_mode.dart';
 import '../../data/auth_controller.dart';
 import '../../data/sync_controller.dart';
 import '../../widgets/snack.dart';
+import '../trial/trial_actions.dart';
 import 'offline_banner.dart';
 
 class _Dest {
@@ -19,11 +20,15 @@ class _Dest {
 
 const _destinations = [
   _Dest('Recipes', Icons.menu_book_outlined, Icons.menu_book_rounded),
+  _Dest('Trial', Icons.science_outlined, Icons.science_rounded),
   _Dest('Meal Plan', Icons.calendar_month_outlined, Icons.calendar_month_rounded),
   _Dest('Shopping', Icons.shopping_basket_outlined, Icons.shopping_basket_rounded),
   _Dest('Import', Icons.download_outlined, Icons.download_rounded),
   _Dest('Settings', Icons.settings_outlined, Icons.settings_rounded),
 ];
+
+/// Index of the Trial destination (its count is shown as a badge).
+const _trialIndex = 1;
 
 /// Adaptive scaffold: NavigationBar on phones, NavigationRail on wide screens.
 /// Also owns app-wide sync triggers (start, resume, notices).
@@ -62,10 +67,18 @@ class _AppShellState extends ConsumerState<AppShell> {
 
   void _go(int index) => widget.shell.goBranch(index, initialLocation: index == widget.shell.currentIndex);
 
+  /// The destination icon; Trial carries the number of trial recipes.
+  Widget _icon(int index, IconData icon, int trials, {bool badge = true}) {
+    final i = Icon(icon);
+    if (index != _trialIndex || !badge) return i;
+    return Badge.count(count: trials, isLabelVisible: trials > 0, child: i);
+  }
+
   @override
   Widget build(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
     final wide = width >= 720;
+    final trials = ref.watch(trialRecipesProvider).length;
     final body = OfflineBanner(child: widget.shell);
     if (!wide) {
       return Scaffold(
@@ -75,8 +88,12 @@ class _AppShellState extends ConsumerState<AppShell> {
           onDestinationSelected: _go,
           labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
           destinations: [
-            for (final d in _destinations)
-              NavigationDestination(icon: Icon(d.icon), selectedIcon: Icon(d.selectedIcon), label: d.label),
+            for (final (i, d) in _destinations.indexed)
+              NavigationDestination(
+                icon: _icon(i, d.icon, trials),
+                selectedIcon: _icon(i, d.selectedIcon, trials),
+                label: d.label,
+              ),
           ],
         ),
       );
@@ -96,11 +113,12 @@ class _AppShellState extends ConsumerState<AppShell> {
                 child: _Brand(extended: extended),
               ),
               destinations: [
-                for (final d in _destinations)
+                for (final (i, d) in _destinations.indexed)
                   NavigationRailDestination(
-                    icon: Icon(d.icon),
-                    selectedIcon: Icon(d.selectedIcon),
-                    label: Text(d.label),
+                    // The extended rail spells the count out ("Trial · 7").
+                    icon: _icon(i, d.icon, trials, badge: !extended),
+                    selectedIcon: _icon(i, d.selectedIcon, trials, badge: !extended),
+                    label: Text(i == _trialIndex && extended && trials > 0 ? '${d.label} · $trials' : d.label),
                   ),
               ],
             ),
