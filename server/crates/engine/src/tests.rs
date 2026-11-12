@@ -125,6 +125,46 @@ fn cookbook() {
 }
 
 #[test]
+fn trial_status_in_backups_imports_and_the_cookbook() {
+    let dir = tempfile::tempdir().unwrap();
+    let backup = dir.path().join("backup.zip");
+    ok(
+        "export_backup",
+        json!({"recipes": [
+            {"id": "t1", "data": {"name": "Miso Aubergine"}, "status": "trial", "tried_count": 2, "last_tried_at": "2026-11-12T18:30:00Z"},
+            {"id": "k1", "data": {"name": "Bread"}}
+        ], "out_path": backup}),
+    );
+    let imported = ok("import_file", json!({"source": "larder", "path": backup, "image_dir": dir.path().join("img")}));
+    let recipes = imported["recipes"].as_array().unwrap();
+    assert_eq!(recipes[0]["trial"], json!({"status": "trial", "tried_count": 2, "last_tried_at": "2026-11-12T18:30:00Z"}));
+    assert_eq!(recipes[1]["trial"]["status"], "cookbook");
+    // other sources do not record a status: the app applies its default
+    let text = ok("import_text", json!({"text": "Toast\n\nIngredients\n1 slice bread"}));
+    assert!(text.get("status").is_none());
+
+    // trial recipes are left out of the printed book
+    let pages = |recipes: Value| {
+        let out = dir.path().join("book.pdf");
+        ok(
+            "render_cookbook",
+            json!({"options": {"title": "T", "include_toc": false, "include_index": false}, "recipes": recipes, "out_path": out}),
+        );
+        let pdf = std::fs::read(&out).unwrap();
+        pdf.windows(10).filter(|w| *w == b"/Type /Pag" || *w == b"/Type/Page").count()
+    };
+    let steps: Vec<Value> =
+        (0..40).map(|i| json!({"text": format!("Step {i}: stir slowly and keep stirring for a long while.")})).collect();
+    let kept = json!({"id": "k1", "data": {"name": "Bread", "instructions": [{"text": "Bake."}]}});
+    let trial = json!({"id": "t1", "status": "trial", "data": {"name": "Miso Aubergine", "instructions": steps}});
+    let cookbook_only = pages(json!([kept.clone()]));
+    assert_eq!(pages(json!([kept.clone(), trial.clone()])), cookbook_only);
+    let mut promoted = trial;
+    promoted["status"] = json!("cookbook");
+    assert!(pages(json!([kept, promoted])) > cookbook_only, "a cookbook recipe adds pages");
+}
+
+#[test]
 fn llm_requires_config() {
     let e = err("llm_recipe_from_text", br#"{"llm":{"provider":"none"},"text":"x"}"#);
     assert_eq!(e["code"], "llm_disabled");
