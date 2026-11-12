@@ -85,6 +85,7 @@ nav:
   - User guide:
       - guide/index.md
       - Recipes: guide/recipes.md
+      - Trial recipes: guide/trial.md
       - Editing recipes: guide/editing.md
       - Organizing recipes: guide/organize.md
       - Scaling & units: guide/scaling.md
