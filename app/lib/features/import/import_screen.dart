@@ -31,8 +31,9 @@ final importJobsProvider = FutureProvider.autoDispose<List<ImportJob>>(
 );
 
 /// Single-recipe imports (website, text, photo) go to the trial list unless
-/// this is switched off. Shared by those tabs.
-final _singleToTrialProvider = NotifierProvider<_SingleToTrial, bool>(_SingleToTrial.new);
+/// this is switched off. Shared by those tabs; starts on every time the
+/// import screen opens.
+final _singleToTrialProvider = NotifierProvider.autoDispose<_SingleToTrial, bool>(_SingleToTrial.new);
 
 class _SingleToTrial extends Notifier<bool> {
   @override
@@ -76,11 +77,15 @@ class _BulkTrialSwitch extends StatelessWidget {
 }
 
 class ImportScreen extends ConsumerStatefulWidget {
-  const ImportScreen({super.key, this.toTrial});
+  const ImportScreen({super.key, this.initialTab, this.trial = false});
 
-  /// Starting value of "Add to Trial" for single-recipe imports, or null to
-  /// keep the last choice (the Import tab on wide screens).
-  final bool? toTrial;
+  /// The tab to open on (`website`, `text`, `photo`, `file`, `mealie` or
+  /// `history`); the first tab when null or unknown.
+  final String? initialTab;
+
+  /// Opened from the trial list: collection imports also start with
+  /// "Add to Trial" on. Single recipes start on the trial list either way.
+  final bool trial;
 
   @override
   ConsumerState<ImportScreen> createState() => _ImportScreenState();
@@ -89,18 +94,6 @@ class ImportScreen extends ConsumerStatefulWidget {
 class _ImportScreenState extends ConsumerState<ImportScreen> {
   ImportJob? _job;
   StreamSubscription<ImportJob>? _sub;
-
-  @override
-  void initState() {
-    super.initState();
-    final toTrial = widget.toTrial;
-    if (toTrial != null) {
-      // Providers can't change while the tree builds.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) ref.read(_singleToTrialProvider.notifier).set(toTrial);
-      });
-    }
-  }
 
   @override
   void dispose() {
@@ -133,12 +126,14 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
       ('Website', Icons.public_rounded, const _UrlTab()),
       ('Text', Icons.notes_rounded, _TextTab(llm: llm)),
       if (llm) ('Photo', Icons.photo_camera_outlined, const _PhotoTab()),
-      ('File', Icons.upload_file_rounded, _FileTab(onJob: track)),
-      ('Mealie', Icons.cloud_download_outlined, _MealieTab(onJob: track)),
+      ('File', Icons.upload_file_rounded, _FileTab(onJob: track, initialTrial: widget.trial)),
+      ('Mealie', Icons.cloud_download_outlined, _MealieTab(onJob: track, initialTrial: widget.trial)),
       ('History', Icons.history_rounded, const _HistoryTab()),
     ];
+    final initial = tabs.indexWhere((t) => t.$1.toLowerCase() == widget.initialTab);
     return DefaultTabController(
       length: tabs.length,
+      initialIndex: initial < 0 ? 0 : initial,
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Import'),
@@ -405,8 +400,9 @@ class _PhotoTabState extends ConsumerState<_PhotoTab> with _Busy {
 }
 
 class _FileTab extends ConsumerStatefulWidget {
-  const _FileTab({required this.onJob});
+  const _FileTab({required this.onJob, this.initialTrial = false});
   final ValueChanged<Stream<ImportJob>> onJob;
+  final bool initialTrial;
 
   @override
   ConsumerState<_FileTab> createState() => _FileTabState();
@@ -416,7 +412,7 @@ class _FileTabState extends ConsumerState<_FileTab> with _Busy {
   String _source = 'auto';
   bool _skipDuplicates = true;
   bool _categorize = true;
-  bool _trial = false;
+  late bool _trial = widget.initialTrial;
 
   void _pick() => run(() async {
     final file = await FilePicker.pickFile();
@@ -474,8 +470,9 @@ class _FileTabState extends ConsumerState<_FileTab> with _Busy {
 }
 
 class _MealieTab extends ConsumerStatefulWidget {
-  const _MealieTab({required this.onJob});
+  const _MealieTab({required this.onJob, this.initialTrial = false});
   final ValueChanged<Stream<ImportJob>> onJob;
+  final bool initialTrial;
 
   @override
   ConsumerState<_MealieTab> createState() => _MealieTabState();
@@ -486,7 +483,7 @@ class _MealieTabState extends ConsumerState<_MealieTab> with _Busy {
   final _token = TextEditingController();
   bool _skipDuplicates = true;
   bool _categorize = true;
-  bool _trial = false;
+  late bool _trial = widget.initialTrial;
 
   @override
   void dispose() {

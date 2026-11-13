@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../data/providers.dart';
 import '../../data/sync_controller.dart';
+import '../add/add_sheet.dart';
 import '../../models/recipe.dart';
 import '../../widgets/recipe_image.dart';
 import '../../widgets/states.dart';
@@ -28,19 +29,11 @@ class TrialScreen extends ConsumerWidget {
     void open(Recipe r) => context.go('/trial/${r.id}');
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(trials.isEmpty ? 'Trial' : 'Trial · ${trials.length}'),
-        actions: [
-          IconButton(
-            tooltip: 'Import a recipe',
-            icon: const Icon(Icons.download_outlined),
-            onPressed: () => context.go('/trial/import'),
-          ),
-        ],
-      ),
+      appBar: AppBar(title: Text(trials.isEmpty ? 'Trial' : 'Trial · ${trials.length}')),
       floatingActionButton: FloatingActionButton.extended(
+        key: const Key('add-trial-recipe'),
         heroTag: 'new-trial-recipe',
-        onPressed: () => context.push('/trial/new'),
+        onPressed: () => openAdd(context, ref, base: '/trial'),
         icon: const Icon(Icons.add_rounded),
         label: const Text('Recipe to try'),
       ),

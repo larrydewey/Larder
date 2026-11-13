@@ -7,6 +7,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../data/app_mode.dart';
 import '../../data/providers.dart';
 import '../../data/sync_controller.dart';
+import '../add/add_sheet.dart';
 import '../../models/recipe.dart';
 import '../../widgets/states.dart';
 import '../trial/trial_actions.dart';
@@ -79,11 +80,6 @@ class _RecipeListScreenState extends ConsumerState<RecipeListScreen> {
       appBar: AppBar(
         title: const Text('Recipes'),
         actions: [
-          IconButton(
-            tooltip: 'Import recipes',
-            icon: const Icon(Icons.download_outlined),
-            onPressed: () => context.go('/recipes/import'),
-          ),
           PopupMenuButton<RecipeSort>(
             tooltip: 'Sort',
             icon: const Icon(Icons.sort_rounded),
@@ -133,10 +129,11 @@ class _RecipeListScreenState extends ConsumerState<RecipeListScreen> {
         ),
       ),
       floatingActionButton: FloatingActionButton.extended(
+        key: const Key('add-recipe'),
         heroTag: 'new-recipe',
-        onPressed: () => context.push('/recipes/new'),
+        onPressed: () => openAdd(context, ref, base: '/recipes'),
         icon: const Icon(Icons.add_rounded),
-        label: const Text('New recipe'),
+        label: const Text('Add recipe'),
       ),
       body: recipesAsync.when(
         loading: () => _Skeleton(grid: grid),
@@ -153,22 +150,10 @@ class _RecipeListScreenState extends ConsumerState<RecipeListScreen> {
                   ? 'Add your first recipe, or import a collection from another app or website.'
                   : 'Add your first recipe, or import a collection from another app or website. '
                         '$trials recipe${trials == 1 ? ' is' : 's are'} waiting on your trial list.',
-              action: Wrap(
-                spacing: 12,
-                runSpacing: 8,
-                alignment: WrapAlignment.center,
-                children: [
-                  FilledButton.icon(
-                    onPressed: () => context.push('/recipes/new'),
-                    icon: const Icon(Icons.add),
-                    label: const Text('New recipe'),
-                  ),
-                  OutlinedButton.icon(
-                    onPressed: () => context.go('/recipes/import'),
-                    icon: const Icon(Icons.download),
-                    label: const Text('Import'),
-                  ),
-                ],
+              action: FilledButton.icon(
+                onPressed: () => openAdd(context, ref, base: '/recipes'),
+                icon: const Icon(Icons.add),
+                label: const Text('Add recipe'),
               ),
             );
           }

@@ -1,6 +1,6 @@
 # Editing recipes
 
-Open the editor with **New recipe** on the recipe list, the **✎** button on a recipe page, or
+Open the editor with **Add recipe** › **Write it myself** on the recipe list, the **✎** button on a recipe page, or
 **Preview & edit** on the Import screen (which opens the editor prefilled with the imported,
 unsaved recipe).
 
