@@ -168,7 +168,7 @@ pub(crate) fn recipe_from_paprika_json(v: &Value) -> ImportedRecipe {
         .or_else(|| text_of(v, &["image_url"]).and_then(|u| resolve_url(&u, None)).map(ImageSource::Url));
     let created_at = text_of(v, &["created"]).and_then(|s| to_rfc3339(&s));
     let favorite = get(v, &["on_favorites"]).is_some_and(as_bool);
-    ImportedRecipe { data: d, image, created_at, favorite }
+    ImportedRecipe { data: d, image, created_at, favorite, trial: None }
 }
 
 #[cfg(test)]

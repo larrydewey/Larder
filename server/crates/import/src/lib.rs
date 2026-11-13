@@ -23,7 +23,7 @@ pub mod text;
 mod util;
 
 pub use html::parse_html;
-pub use larder_core::RecipeData;
+pub use larder_core::{RecipeData, RecipeStatus, TrialState};
 pub use net::{fetch_image, scrape_url, USER_AGENT};
 pub use util::image_extension;
 
@@ -46,6 +46,24 @@ pub struct ImportedRecipe {
     pub created_at: Option<String>,
     /// Whether the source marks the recipe as a favourite.
     pub favorite: bool,
+    /// Status and trial counters, when the source records them (Larder
+    /// archives). `None`: the importer's default applies, see [`ImportedRecipe::trial_state`].
+    pub trial: Option<TrialState>,
+}
+
+impl ImportedRecipe {
+    /// The trial state to save the recipe with. `status` (the user's choice
+    /// on the import screen) wins; otherwise what the source recorded, and
+    /// failing that `default` (trial for single-recipe imports, cookbook for
+    /// bulk imports).
+    pub fn trial_state(&self, status: Option<RecipeStatus>, default: RecipeStatus) -> TrialState {
+        let mut t = self.trial.clone().unwrap_or_else(|| TrialState::new(default));
+        if let Some(s) = status {
+            t.status = s;
+        }
+        t.normalize();
+        t
+    }
 }
 
 /// Import file formats.

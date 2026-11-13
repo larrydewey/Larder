@@ -154,7 +154,12 @@ class Migrator {
 
   Future<void> _uploadRecipe(Recipe r, MigrationReport report) async {
     final ok = await _tolerant(
-      () => api.post('/api/recipes', r.toInput(includeVersion: false)),
+      () => api.post('/api/recipes', {
+        ...r.toInput(includeVersion: false),
+        // Accepted on create only, so the trial history moves with the recipe.
+        'tried_count': r.triedCount,
+        'last_tried_at': r.lastTriedAt?.toUtc().toIso8601String(),
+      }),
       'Recipe "${r.name}"',
       report,
     );

@@ -196,6 +196,9 @@ Recipe = {
   "nutrition": { "calories": "250 kcal" },  // string -> string
   "image_url": "/api/images/<image_id>",    // null when no image; append ?size=thumb|medium|full (default medium)
   "is_favorite": false,          // for the requesting user
+  "status": "cookbook",          // "cookbook" | "trial" (household-wide, see Trial recipes)
+  "tried_count": 0,              // how often "I made this" was recorded
+  "last_tried_at": null,         // when it was last made, or null
   "created_by": "uuid",
   "created_at": "...",
   "updated_at": "...",
@@ -204,13 +207,17 @@ Recipe = {
 
 RecipeSummary = {
   "id", "slug", "name", "description", "image_url", "tags", "categories", "rating",
-  "total_time_minutes", "yield_quantity", "yield_unit", "is_favorite", "updated_at"
+  "total_time_minutes", "yield_quantity", "yield_unit", "is_favorite", "status", "tried_count",
+  "last_tried_at", "created_at", "updated_at"
 }
 
 RecipeInput = Recipe without id(optional), household_id, slug, image_url, is_favorite,
               created_by, created_at, updated_at.
               "version" optional on update: if provided and != current version -> 409 conflict
               (response body includes the current recipe as "current").
+              "status" optional: defaults to "cookbook" on create; omitted on update = unchanged.
+              "tried_count" / "last_tried_at" are accepted on create only (e.g. moving
+              standalone data to a server); updates ignore them.
               Ingredients may be sent with only "original" set; the server parses missing fields.
 ```
 
@@ -219,6 +226,8 @@ Image URLs are capability URLs (random image id) and do NOT require auth so they
 - `GET /api/recipes?q=&tag=&category=&favorites=true&sort=name|-name|updated|-updated|created|-created|rating|-rating&page=1&per_page=50`
   → `{ "items": [RecipeSummary], "total": 123, "page": 1, "per_page": 50 }`.
   `q` matches name, description, ingredients, tags & categories (all whitespace-separated terms must match).
+  `status=cookbook|trial|all`: without it a plain listing returns only cookbook recipes, while a
+  search (`q`) covers every recipe (each item carries its `status`). Other values return `400`.
   `tag` and `category` may be repeated (all must match). Default sort `name`. `per_page` max 500.
 - `POST /api/recipes` `RecipeInput` → `201 Recipe`
 - `GET /api/recipes/{id_or_slug}` → `Recipe`
@@ -234,6 +243,7 @@ Image URLs are capability URLs (random image id) and do NOT require auth so they
   The public page `GET /s/{token}` (outside `/api`, no authentication) returns HTML: the recipe,
   or `404` "Recipe not available".
 - `PUT /api/recipes/{id}/favorite` → `204`, `DELETE /api/recipes/{id}/favorite` → `204`
+- `POST /api/recipes/{id}/tried` → `Recipe` (see Trial recipes)
 - `PUT /api/recipes/{id}/image` multipart form field `file` (jpeg/png/webp/gif) → `Recipe`
 - `DELETE /api/recipes/{id}/image` → `Recipe`
 - `GET /api/images/{image_id}?size=thumb|medium|full` (public) → image/jpeg (thumb 320px, medium 960px, full original-ish ≤ 2400px)
@@ -271,6 +281,30 @@ Image URLs are capability URLs (random image id) and do NOT require auth so they
   any other categories are kept after it. Changed recipes are saved like a normal update (their
   `version` increments). An invalid `categorize` value returns `400`.
 
+### Trial recipes
+
+A recipe's `status` is `cookbook` (the main collection) or `trial` (recipes the household wants to
+try first). Trial recipes are left out of the plain recipe list and of the printed cookbook, but
+are found by searches and work everywhere else (meal plan, shopping lists, share links). Viewing a
+recipe never changes it; only these explicit actions do:
+
+- Move to the cookbook / back to trial: `PUT /api/recipes/{id}` with `"status"`.
+- Discard: `DELETE /api/recipes/{id}`.
+- "I made this": `POST /api/recipes/{id}/tried`
+```js
+{
+  "outcome": "keep",                  // "keep": move to the cookbook; "again": status unchanged
+  "tried_at": "2026-11-12T18:30:00Z", // optional, default now; also identifies the verdict
+  "date": "2026-11-12",               // optional: the cook's local date for the note line
+  "rating": 4,                        // optional 1-5; omitted or null keeps the rating
+  "note": "too salty, cut soy by half" // optional; appended to notes as "Nov 12, 2026: too salty, …"
+}
+```
+  → `Recipe`. Adds 1 to `tried_count`, moves `last_tried_at` forward (never back) and increments
+  `version`, in one statement, so verdicts sent from several devices all count. Sending the same
+  verdict again (same `tried_at` as the stored `last_tried_at`, e.g. an offline outbox retry)
+  changes nothing and returns the recipe. Invalid values return `400`.
+
 ### Ingredient parsing
 - `POST /api/parse/ingredients` `{ "lines": ["2 cups flour"], "use_llm": false }` → `[Ingredient]`
   (`use_llm: true` requires LLM to be enabled, else `400 llm_disabled`). Returns the raw parse;
@@ -305,12 +339,17 @@ MealPlanEntry = {
   "title": null,                 // free text, e.g. "Leftovers"
   "note": null,
   "servings": 4,                 // nullable; used when adding to shopping list
+  "recipe_status": "trial",      // read-only: the recipe's status, null without a recipe
+  "trial_outcome": null,         // how "Did you make it?" was answered: "keep" | "again" | "discard" | "skipped"
+  "trial_resolved_at": null,     // when it was answered
   "created_by": "uuid", "updated_at": "..."
 }
 ```
 - `GET /api/mealplan?start=2026-11-09&end=2026-11-15` (inclusive) → `[MealPlanEntry]` sorted by date, meal order.
-- `POST /api/mealplan` `{ "id"?, "date", "meal", "recipe_id"?, "title"?, "note"?, "servings"? }` → `201 MealPlanEntry`
-- `PUT /api/mealplan/{id}` same body → `MealPlanEntry`
+- `POST /api/mealplan` `{ "id"?, "date", "meal", "recipe_id"?, "title"?, "note"?, "servings"?, "trial_outcome"? }` → `201 MealPlanEntry`
+- `PUT /api/mealplan/{id}` same body → `MealPlanEntry`. `trial_outcome` omitted or null leaves the
+  answer unchanged, `""` clears it; `trial_resolved_at` is set when the answer changes. Clients ask
+  "Did you make it?" once for past entries of trial recipes and record the answer here.
 - `DELETE /api/mealplan/{id}` → `204`
 
 ## Shopping lists
@@ -368,15 +407,21 @@ Imported recipes are normalised like any saved recipe. Single-recipe imports (`u
 `image` previews) give a recipe without categories the suggested category (see
 `POST /api/recipes/organize`).
 
-- `POST /api/import/url` `{ "url": "https://...", "save": true }` → `201 Recipe` if `save`, else `200 RecipeInput` (preview).
+Single-recipe imports (`url`, `text`, `image`) save to the trial list unless `status` says
+otherwise (previews include the `status` the recipe would get). Bulk imports (`file`, `mealie`)
+save to the cookbook, except that Larder archives keep each recipe's stored `status`,
+`tried_count` and `last_tried_at`; a `status` field puts every recipe there instead.
+
+- `POST /api/import/url` `{ "url": "https://...", "save": true, "status"?: "trial" }` → `201 Recipe` if `save`, else `200 RecipeInput` (preview).
   URLs pointing at `localhost`, loopback, link-local, unspecified or `0.0.0.0/8` addresses are
   refused (`400`), including after DNS resolution and on every redirect; LAN addresses are allowed.
-- `POST /api/import/text` `{ "text": "...", "save": false, "use_llm": false }` → `RecipeInput` / `201 Recipe`
+- `POST /api/import/text` `{ "text": "...", "save": false, "use_llm": false, "status"?: "trial" }` → `RecipeInput` / `201 Recipe`
   (without LLM a heuristic parser looks for Ingredients/Instructions headings)
-- `POST /api/import/image` multipart `file` (photo of a recipe), field `save` = `true|false` → requires LLM.
+- `POST /api/import/image` multipart `file` (photo of a recipe), fields `save` = `true|false`, `status` (optional) → requires LLM.
 - `POST /api/import/file` multipart: `source` = `auto|mealie|tandoor|paprika|nextcloud|recipekeeper|larder|jsonld`,
   `file` = the export file, `skip_duplicates` = `true|false` (default true),
-  `categorize` = `true|false` (default true: recipes without categories get the suggested one) → `202 ImportJob`
+  `categorize` = `true|false` (default true: recipes without categories get the suggested one),
+  `status` = `cookbook|trial` (optional, see above; anything else is `400`) → `202 ImportJob`
   - `mealie`: Mealie recipe export zip or Mealie backup zip
   - `tandoor`: Tandoor export zip (zip of per-recipe zips containing `recipe.json` + image)
   - `paprika`: `.paprikarecipes` file
@@ -384,7 +429,7 @@ Imported recipes are normalised like any saved recipe. Single-recipe imports (`u
   - `recipekeeper`: Recipe Keeper export zip (`recipes.html` + `images/`)
   - `larder`: Larder export zip (`GET /api/export/json`)
   - `jsonld`: a `.json` file containing one schema.org Recipe or an array of them
-- `POST /api/import/mealie` `{ "base_url": "https://mealie.example.com", "token": "...", "skip_duplicates": true, "categorize": true }` → `202 ImportJob`
+- `POST /api/import/mealie` `{ "base_url": "https://mealie.example.com", "token": "...", "skip_duplicates": true, "categorize": true, "status"?: "trial" }` → `202 ImportJob`
   (imports via the live Mealie API, including images; `base_url` is subject to the same address
   checks as URL imports)
 - `GET /api/import/jobs` → `[ImportJob]` (latest 50 for household)
@@ -393,6 +438,8 @@ Imported recipes are normalised like any saved recipe. Single-recipe imports (`u
 ## Export
 
 - `GET /api/export/json` → `application/zip` (`recipes.json` + `images/<recipe_id>.jpg`), re-importable with source `larder`.
+  Each recipe carries `status`, `tried_count` and `last_tried_at` (optional on import: older
+  archives import into the cookbook).
 - `GET /api/export/cookbook/themes` → `[{ "id": "classic", "name": "Classic", "description": "..." }]`
 - `POST /api/export/cookbook` →  `application/pdf`
 ```js
@@ -403,7 +450,8 @@ Imported recipes are normalised like any saved recipe. Single-recipe imports (`u
   "dedication": "For Grandma",              // optional
   "theme": "classic",                       // "classic" | "modern" | "rustic"
   "paper": "letter",                        // "letter" | "a4" | "a5"
-  "recipe_ids": null,                       // null = all household recipes
+  "recipe_ids": null,                       // null = all household recipes; trial recipes are always
+                                            // left out (400 if nothing printable was picked)
   "group_by": "category",                   // "category" | "tag" | "none"
   "chapter_order": ["Breakfast", "Mains"],  // optional explicit chapter ordering
   "include_images": true,

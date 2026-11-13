@@ -14,6 +14,7 @@ import 'package:larder/data/providers.dart';
 import 'package:larder/models/cookbook.dart';
 import 'package:larder/models/meal_plan.dart';
 import 'package:larder/models/recipe.dart';
+import 'package:larder/models/trial.dart';
 import 'package:larder/standalone/standalone.dart';
 import 'package:larder/standalone/standalone_io.dart';
 
@@ -72,6 +73,109 @@ void main() {
 
     await repo.save(r.copyWith(name: 'Fluffy pancakes'), isNew: false);
     expect((await store.recipe('r1'))!.version, 2);
+  });
+
+  group('trial recipes', () {
+    test('verdicts count on the device; edits keep the counters', () async {
+      final repo = c.read(recipeRepositoryProvider);
+      await repo.save(Recipe(id: 'r1', name: 'Miso Aubergine', status: RecipeStatus.trial), isNew: true);
+      final r = (await store.recipe('r1'))!;
+      expect((r.status, r.triedCount), (RecipeStatus.trial, 0));
+
+      final o = await repo.recordTried(
+        r,
+        TrialVerdict(
+          keep: false,
+          rating: 4,
+          note: 'too salty',
+          triedAt: DateTime.utc(2026, 11, 12, 19),
+          date: DateTime(2026, 11, 12),
+        ),
+      );
+      expect(o.kind, OutcomeKind.applied);
+      var saved = (await store.recipe('r1'))!;
+      expect((saved.triedCount, saved.rating, saved.notes, saved.version), (1, 4, 'Nov 12, 2026: too salty', 2));
+      expect(saved.lastTriedAt, DateTime.utc(2026, 11, 12, 19));
+
+      // An edit made from a copy without the counters does not reset them.
+      await repo.save(
+        saved.copyWith(name: 'Miso Glazed Aubergine', triedCount: 0, lastTriedAt: () => null),
+        isNew: false,
+      );
+      saved = (await store.recipe('r1'))!;
+      expect((saved.name, saved.triedCount, saved.status), ('Miso Glazed Aubergine', 1, RecipeStatus.trial));
+      expect(saved.lastTriedAt, isNotNull);
+
+      await repo.recordTried(saved, TrialVerdict(keep: true));
+      saved = (await store.recipe('r1'))!;
+      expect((saved.status, saved.triedCount), (RecipeStatus.cookbook, 2));
+
+      final copy = await repo.duplicate('r1');
+      expect((copy.triedCount, copy.lastTriedAt), (0, null));
+      expect(server.requests, isEmpty);
+    });
+
+    test('single imports default to trial, bulk imports to the cookbook, backups keep their status', () async {
+      engine.overrides['import_url'] = (args) => {
+        'data': {'name': 'Website stew'},
+      };
+      final imports = c.read(importServiceProvider);
+      expect((await imports.importUrl('https://example.com/stew')).status, RecipeStatus.trial);
+      expect(
+        (await imports.importUrl('https://example.com/stew2', status: RecipeStatus.cookbook)).status,
+        RecipeStatus.cookbook,
+      );
+
+      engine.overrides['import_file'] = (args) => {
+        'source': 'larder',
+        'recipes': [
+          {
+            'data': {'name': 'Plain import'},
+          },
+          {
+            'data': {'name': 'Kept on trial'},
+            'trial': {'status': 'trial', 'tried_count': 3, 'last_tried_at': '2026-11-01T18:00:00.000000Z'},
+          },
+          {
+            'data': {'name': 'Kept in cookbook'},
+            'trial': {'status': 'cookbook', 'tried_count': 0, 'last_tried_at': null},
+          },
+        ],
+        'errors': [],
+      };
+      await imports.importFile(Uint8List.fromList([1]), 'backup.zip', source: 'larder').last;
+      var byName = {for (final r in await store.recipes()) r.name: r};
+      expect(byName['Plain import']!.status, RecipeStatus.cookbook);
+      expect((byName['Kept on trial']!.status, byName['Kept on trial']!.triedCount), (RecipeStatus.trial, 3));
+      expect(byName['Kept on trial']!.lastTriedAt, DateTime.utc(2026, 11, 1, 18));
+      expect(byName['Kept in cookbook']!.status, RecipeStatus.cookbook);
+
+      for (final r in await store.recipes()) {
+        await store.deleteRecipe(r.id);
+      }
+      await imports
+          .importFile(Uint8List.fromList([1]), 'backup.zip', source: 'larder', status: RecipeStatus.trial)
+          .last;
+      byName = {for (final r in await store.recipes()) r.name: r};
+      expect(byName.values.map((r) => r.status).toSet(), {RecipeStatus.trial});
+      expect(byName['Kept on trial']!.triedCount, 3, reason: 'the override keeps the counters');
+    });
+
+    test('the printed cookbook leaves trial recipes out; backups keep them with their status', () async {
+      final repo = c.read(recipeRepositoryProvider);
+      await repo.save(Recipe(id: 'k1', name: 'Kept'), isNew: true);
+      await repo.save(Recipe(id: 't1', name: 'Trying', status: RecipeStatus.trial), isNew: true);
+      await repo.recordTried((await store.recipe('t1'))!, TrialVerdict(keep: false));
+      final cookbook = c.read(cookbookServiceProvider);
+      final pdf = utf8.decode(await cookbook.renderCookbook(CookbookOptions()));
+      expect(pdf, contains('"k1"'));
+      expect(pdf, isNot(contains('"t1"')));
+      final picked = utf8.decode(await cookbook.renderCookbook(CookbookOptions(recipeIds: ['t1', 'k1'])));
+      expect(picked, isNot(contains('"t1"')));
+      final zip = utf8.decode(await cookbook.exportBackup());
+      expect(zip, contains('"status":"trial"'));
+      expect(zip, contains('"tried_count":1'));
+    });
   });
 
   test('images are processed into local files and removed with the recipe', () async {

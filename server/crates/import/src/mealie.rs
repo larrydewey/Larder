@@ -232,7 +232,7 @@ pub fn recipe_from_mealie_json(v: &Value) -> ImportedRecipe {
     d.normalize();
 
     let created_at = text_of(v, &["created_at", "createdAt", "date_added", "dateAdded"]).and_then(|s| to_rfc3339(&s));
-    ImportedRecipe { data: d, image: None, created_at, favorite: false }
+    ImportedRecipe { data: d, image: None, created_at, favorite: false, trial: None }
 }
 
 // ---------------------------------------------------------------------------

@@ -109,7 +109,11 @@ class _CookbookScreenState extends ConsumerState<CookbookScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final recipes = ref.watch(recipesProvider).value ?? const <Recipe>[];
+    // Trial recipes are not vetted yet and never go into the printed book.
+    final recipes = [
+      for (final r in ref.watch(recipesProvider).value ?? const <Recipe>[])
+        if (!r.isTrial) r,
+    ];
     final themes = ref.watch(cookbookThemesProvider);
     // Recomputed on every build, so it follows the selection, the grouping
     // and edits to the recipes. Until the user drags a chapter the list is the

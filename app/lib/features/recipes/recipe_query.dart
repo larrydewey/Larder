@@ -81,10 +81,14 @@ bool _containsCi(Iterable<String> values, String wanted) => values.any((v) => v.
 /// Search/filter/sort done locally on the cached recipes (works offline).
 /// Mirrors the server semantics: every whitespace-separated term must match
 /// name, description, ingredients, tags or categories; all selected tags and
-/// categories must be present.
-List<Recipe> applyRecipeQuery(List<Recipe> all, RecipeQuery q) {
+/// categories must be present. Like `GET /api/recipes`, trial recipes are
+/// left out of a plain listing but found by a text search; [includeTrial]
+/// overrides that.
+List<Recipe> applyRecipeQuery(List<Recipe> all, RecipeQuery q, {bool? includeTrial}) {
   final terms = foldText(q.text).split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toList();
+  final withTrial = includeTrial ?? terms.isNotEmpty;
   final out = all.where((r) {
+    if (!withTrial && r.isTrial) return false;
     if (q.favoritesOnly && !r.isFavorite) return false;
     for (final t in q.tags) {
       if (!_containsCi(r.tags, t)) return false;

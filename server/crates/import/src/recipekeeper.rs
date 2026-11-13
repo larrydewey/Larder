@@ -148,7 +148,7 @@ pub(crate) fn parse_document(html: &str, image: &mut dyn FnMut(&str) -> Option<V
             }
         });
         let ctx = if d.name.is_empty() { format!("#{}", i + 1) } else { d.name.clone() };
-        c.push(ImportedRecipe { data: d, image, created_at: None, favorite }, &ctx);
+        c.push(ImportedRecipe { data: d, image, created_at: None, favorite, trial: None }, &ctx);
     }
     found
 }

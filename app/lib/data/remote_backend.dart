@@ -11,6 +11,7 @@ import '../models/meal_plan.dart';
 import '../models/organize.dart';
 import '../models/recipe.dart';
 import '../models/shopping.dart';
+import '../models/trial.dart';
 import 'backend.dart';
 import 'local_store.dart';
 import 'outbox_op.dart';
@@ -84,6 +85,27 @@ class RemoteRecipeRepository extends _Repo implements RecipeRepository {
       '/api/recipes/${recipe.id}/favorite',
       null,
       label: favorite ? 'Favoriting "${recipe.name}"' : 'Unfavoriting "${recipe.name}"',
+    );
+  }
+
+  /// Optimistic like a save; the server counts the verdict atomically, so
+  /// verdicts from several devices all count, and `tried_at` makes an outbox
+  /// replay harmless.
+  @override
+  Future<OpOutcome> recordTried(Recipe recipe, TrialVerdict verdict) async {
+    final current = await store.recipe(recipe.id) ?? recipe;
+    await store.putRecipe(
+      applyTrialVerdict(current, verdict).copyWith(
+        updatedAt: DateTime.now().toUtc(),
+        version: () => current.version == null ? null : current.version! + 1,
+      ),
+    );
+    return submit(
+      'POST',
+      '/api/recipes/${recipe.id}/tried',
+      verdict.toJson(),
+      apply: ApplyKind.recipe,
+      label: 'Saving how "${recipe.name}" went',
     );
   }
 
@@ -315,8 +337,8 @@ class RemoteImportService extends _Repo implements ImportService {
       _preview(await sync.online((api) => api.importUrl(url, save: false)));
 
   @override
-  Future<Recipe> importUrl(String url) async {
-    final r = Recipe.fromJson(await sync.online((api) => api.importUrl(url, save: true)));
+  Future<Recipe> importUrl(String url, {String status = RecipeStatus.trial}) async {
+    final r = Recipe.fromJson(await sync.online((api) => api.importUrl(url, save: true, status: status)));
     await store.putRecipe(r);
     return r;
   }
@@ -336,19 +358,32 @@ class RemoteImportService extends _Repo implements ImportService {
     required String source,
     bool skipDuplicates = true,
     bool categorize = true,
+    String? status,
   }) => _track(
     () => sync.online(
-      (api) => api.importFile(bytes, filename, source: source, skipDuplicates: skipDuplicates, categorize: categorize),
+      (api) => api.importFile(
+        bytes,
+        filename,
+        source: source,
+        skipDuplicates: skipDuplicates,
+        categorize: categorize,
+        status: status,
+      ),
     ),
   );
 
   @override
-  Stream<ImportJob> importMealie(String baseUrl, String token, {bool skipDuplicates = true, bool categorize = true}) =>
-      _track(
-        () => sync.online(
-          (api) => api.importMealie(baseUrl, token, skipDuplicates: skipDuplicates, categorize: categorize),
-        ),
-      );
+  Stream<ImportJob> importMealie(
+    String baseUrl,
+    String token, {
+    bool skipDuplicates = true,
+    bool categorize = true,
+    String? status,
+  }) => _track(
+    () => sync.online(
+      (api) => api.importMealie(baseUrl, token, skipDuplicates: skipDuplicates, categorize: categorize, status: status),
+    ),
+  );
 
   /// Starts a server job and polls GET /api/import/jobs/{id} until finished.
   Stream<ImportJob> _track(Future<ImportJob> Function() start) async* {

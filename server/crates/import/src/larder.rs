@@ -1,10 +1,14 @@
 //! Larder's own export format: a zip with `manifest.json`
 //! (`{"format": "larder-export", "version": 1}`), `recipes.json` (array of
 //! [`ExportedRecipe`]) and `images/<id>.<ext>`.
+//!
+//! `status`, `tried_count` and `last_tried_at` were added without a version
+//! bump: they are optional (older archives import into the cookbook) and older
+//! Larder versions ignore them.
 
 use std::io::{Cursor, Write};
 
-use larder_core::RecipeData;
+use larder_core::{RecipeData, TrialState};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use zip::write::SimpleFileOptions;
@@ -30,6 +34,9 @@ pub struct ExportedRecipe {
     pub image: Option<String>,
     #[serde(default)]
     pub favorite: bool,
+    /// `status` (`cookbook` | `trial`), `tried_count`, `last_tried_at`.
+    #[serde(flatten)]
+    pub trial: TrialState,
     #[serde(default)]
     pub created_at: Option<String>,
     #[serde(default)]
@@ -154,7 +161,8 @@ pub(crate) fn parse_json_value(v: &Value, mut load: Option<&mut ImageLoader<'_>>
             (Some(path), None) if path.starts_with("http") => Some(ImageSource::Url(path.clone())),
             _ => None,
         };
-        c.push(ImportedRecipe { data: rec.data, image, created_at: rec.created_at, favorite: rec.favorite }, &ctx);
+        let imported = ImportedRecipe { data: rec.data, image, created_at: rec.created_at, favorite: rec.favorite, trial: Some(rec.trial) };
+        c.push(imported, &ctx);
     }
 }
 
@@ -162,7 +170,7 @@ pub(crate) fn parse_json_value(v: &Value, mut load: Option<&mut ImageLoader<'_>>
 mod tests {
     use super::*;
     use crate::{parse_file, Source};
-    use larder_core::{Ingredient, Instruction};
+    use larder_core::{Ingredient, Instruction, RecipeStatus};
 
     const JPEG: &[u8] = &[0xFF, 0xD8, 0xFF, 0xE0, 9, 9, 9];
     const PNG: &[u8] = b"\x89PNG\r\n\x1a\nxxxx";
@@ -188,6 +196,7 @@ mod tests {
             data,
             image: None,
             favorite: true,
+            trial: TrialState::default(),
             created_at: Some("2024-01-01T00:00:00Z".into()),
             updated_at: Some("2024-02-01T00:00:00Z".into()),
         }
@@ -224,6 +233,45 @@ mod tests {
         let m: Value = serde_json::from_str(&m).unwrap();
         assert_eq!(m["format"], FORMAT);
         assert_eq!(m["version"], 1);
+    }
+
+    #[test]
+    fn trial_status_round_trips() {
+        let mut trial = sample("t1", "Miso Soup");
+        trial.trial = TrialState { status: RecipeStatus::Trial, tried_count: 2, last_tried_at: Some("2026-11-12T18:30:00.000000Z".into()) };
+        let kept = sample("k1", "Bread");
+        let zip = write_export(vec![(trial.clone(), None), (kept, None)]).unwrap();
+
+        // the fields are written next to the recipe content
+        let mut z = zip::ZipArchive::new(Cursor::new(zip.clone())).unwrap();
+        let mut json = String::new();
+        std::io::Read::read_to_string(&mut z.by_name("recipes.json").unwrap(), &mut json).unwrap();
+        let v: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v[0]["status"], "trial");
+        assert_eq!(v[0]["tried_count"], 2);
+        assert_eq!(v[1]["status"], "cookbook");
+
+        let batch = parse_file(Source::Auto, "larder-export.zip", &zip).unwrap();
+        let t = batch.recipes[0].trial.clone().expect("archives record the status");
+        assert_eq!(t, trial.trial);
+        assert_eq!(batch.recipes[0].trial_state(None, RecipeStatus::Cookbook), trial.trial);
+        assert_eq!(batch.recipes[1].trial_state(None, RecipeStatus::Trial).status, RecipeStatus::Cookbook);
+        // the import screen's choice overrides the archive but keeps the counters
+        let forced = batch.recipes[0].trial_state(Some(RecipeStatus::Cookbook), RecipeStatus::Cookbook);
+        assert_eq!(forced.status, RecipeStatus::Cookbook);
+        assert_eq!(forced.tried_count, 2);
+    }
+
+    #[test]
+    fn archives_without_status_import_into_the_cookbook() {
+        let json = br#"[{"id": "x", "name": "Old Favourite"}, {"id": "y", "name": "Odd", "status": "someday"}]"#;
+        let b = parse_file(Source::Larder, "recipes.json", json).unwrap();
+        assert_eq!(b.recipes.len(), 1);
+        assert_eq!(b.recipes[0].trial, Some(TrialState::default()));
+        assert_eq!(b.recipes[0].trial_state(None, RecipeStatus::Trial).status, RecipeStatus::Cookbook);
+        // an unknown status is reported, not guessed
+        assert_eq!(b.errors.len(), 1, "{:?}", b.errors);
+        assert!(b.errors[0].contains("someday"), "{:?}", b.errors);
     }
 
     #[test]

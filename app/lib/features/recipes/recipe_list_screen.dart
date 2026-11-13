@@ -9,6 +9,7 @@ import '../../data/providers.dart';
 import '../../data/sync_controller.dart';
 import '../../models/recipe.dart';
 import '../../widgets/states.dart';
+import '../trial/trial_actions.dart';
 import 'recipe_card.dart';
 import 'recipe_query.dart';
 
@@ -72,11 +73,17 @@ class _RecipeListScreenState extends ConsumerState<RecipeListScreen> {
     final query = ref.watch(recipeQueryProvider);
     final grid = ref.watch(_gridViewProvider);
     final sync = ref.watch(syncProvider);
+    final discarding = ref.watch(pendingDiscardsProvider);
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Recipes'),
         actions: [
+          IconButton(
+            tooltip: 'Import recipes',
+            icon: const Icon(Icons.download_outlined),
+            onPressed: () => context.go('/recipes/import'),
+          ),
           PopupMenuButton<RecipeSort>(
             tooltip: 'Sort',
             icon: const Icon(Icons.sort_rounded),
@@ -135,12 +142,17 @@ class _RecipeListScreenState extends ConsumerState<RecipeListScreen> {
         loading: () => _Skeleton(grid: grid),
         error: (e, _) => ErrorState(error: e, onRetry: () => ref.invalidate(recipesProvider)),
         data: (all) {
-          if (all.isEmpty) {
-            if (sync.syncing && sync.lastSync == null) return _Skeleton(grid: grid);
+          // Trial recipes are listed under Trial (a search still finds them).
+          final trials = all.where((r) => r.isTrial).length;
+          if (all.length == trials && !query.isFiltered) {
+            if (all.isEmpty && sync.syncing && sync.lastSync == null) return _Skeleton(grid: grid);
             return EmptyState(
               icon: Icons.menu_book_rounded,
               title: 'Your cookbook is empty',
-              message: 'Add your first recipe, or import a collection from another app or website.',
+              message: trials == 0
+                  ? 'Add your first recipe, or import a collection from another app or website.'
+                  : 'Add your first recipe, or import a collection from another app or website. '
+                        '$trials recipe${trials == 1 ? ' is' : 's are'} waiting on your trial list.',
               action: Wrap(
                 spacing: 12,
                 runSpacing: 8,
@@ -152,7 +164,7 @@ class _RecipeListScreenState extends ConsumerState<RecipeListScreen> {
                     label: const Text('New recipe'),
                   ),
                   OutlinedButton.icon(
-                    onPressed: () => context.go('/import'),
+                    onPressed: () => context.go('/recipes/import'),
                     icon: const Icon(Icons.download),
                     label: const Text('Import'),
                   ),
@@ -160,7 +172,10 @@ class _RecipeListScreenState extends ConsumerState<RecipeListScreen> {
               ),
             );
           }
-          final results = applyRecipeQuery(all, query);
+          final results = applyRecipeQuery([
+            for (final r in all)
+              if (!discarding.contains(r.id)) r,
+          ], query);
           if (results.isEmpty) {
             return EmptyState(
               icon: Icons.search_off_rounded,

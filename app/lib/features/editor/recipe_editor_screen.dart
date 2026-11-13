@@ -36,7 +36,7 @@ final _serverTagsProvider = FutureProvider<(List<String>, List<String>)>((ref) a
 });
 
 class RecipeEditorScreen extends ConsumerStatefulWidget {
-  const RecipeEditorScreen({super.key, this.id, this.draft, this.draftImagePath});
+  const RecipeEditorScreen({super.key, this.id, this.draft, this.draftImagePath, this.base = '/recipes'});
 
   /// Existing recipe to edit.
   final String? id;
@@ -46,6 +46,9 @@ class RecipeEditorScreen extends ConsumerStatefulWidget {
 
   /// On-device image that came with an import preview (standalone).
   final String? draftImagePath;
+
+  /// The list the editor was opened from (`/recipes` or `/trial`).
+  final String base;
 
   @override
   ConsumerState<RecipeEditorScreen> createState() => _RecipeEditorScreenState();
@@ -70,6 +73,7 @@ class _RecipeEditorScreenState extends ConsumerState<RecipeEditorScreen> {
   final _sourceName = TextEditingController();
   final _notes = TextEditingController();
   int? _rating;
+  String _status = RecipeStatus.cookbook;
   List<String> _tags = [];
   List<String> _categories = [];
   final _ingredients = LineListController();
@@ -133,6 +137,7 @@ class _RecipeEditorScreenState extends ConsumerState<RecipeEditorScreen> {
     _sourceName.text = r?.sourceName ?? '';
     _notes.text = r?.notes ?? '';
     _rating = r?.rating;
+    _status = r?.status ?? RecipeStatus.cookbook;
     _tags = [...?r?.tags];
     _categories = [...?r?.categories];
     _ingredients.setLines(ingredientsToLines(r?.ingredients ?? const []));
@@ -205,6 +210,10 @@ class _RecipeEditorScreenState extends ConsumerState<RecipeEditorScreen> {
       createdAt: base?.createdAt ?? DateTime.now().toUtc(),
       updatedAt: DateTime.now().toUtc(),
       version: base?.version,
+      status: _status,
+      // Only verdicts change these; the editor passes them through.
+      triedCount: base?.triedCount ?? 0,
+      lastTriedAt: base?.lastTriedAt,
     );
     return recipe;
   }
@@ -232,7 +241,7 @@ class _RecipeEditorScreenState extends ConsumerState<RecipeEditorScreen> {
           await _syncImage(recipe.id);
       }
       _dirty = false;
-      if (mounted) context.go('/recipes/${recipe.id}');
+      if (mounted) context.go('${widget.base}/${recipe.id}');
     } catch (e) {
       showError(e);
     } finally {
@@ -332,7 +341,7 @@ class _RecipeEditorScreenState extends ConsumerState<RecipeEditorScreen> {
             onPressed: () async {
               if (await _confirmDiscard() && context.mounted) {
                 _dirty = false;
-                context.canPop() ? context.pop() : context.go(_isNew ? '/recipes' : '/recipes/${widget.id}');
+                context.canPop() ? context.pop() : context.go(_isNew ? widget.base : '${widget.base}/${widget.id}');
               }
             },
           ),
@@ -387,6 +396,41 @@ class _RecipeEditorScreenState extends ConsumerState<RecipeEditorScreen> {
                             _dirty = true;
                           }),
                         ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 8,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        const Text('Save to'),
+                        SegmentedButton<String>(
+                          key: const Key('status-choice'),
+                          showSelectedIcon: false,
+                          segments: const [
+                            ButtonSegment(
+                              value: RecipeStatus.cookbook,
+                              icon: Icon(Icons.menu_book_outlined),
+                              label: Text('Cookbook'),
+                            ),
+                            ButtonSegment(
+                              value: RecipeStatus.trial,
+                              icon: Icon(Icons.science_outlined),
+                              label: Text('Trial'),
+                            ),
+                          ],
+                          selected: {_status},
+                          onSelectionChanged: (s) => setState(() {
+                            _status = s.first;
+                            _dirty = true;
+                          }),
+                        ),
+                        if (_status == RecipeStatus.trial)
+                          Text(
+                            'Kept apart until you decide it belongs in the cookbook.',
+                            style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                          ),
                       ],
                     ),
                     const SectionHeader('Details'),

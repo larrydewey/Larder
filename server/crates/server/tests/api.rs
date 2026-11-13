@@ -407,6 +407,7 @@ fn urlencode(s: &str) -> String {
 async fn extra_scenarios(t: &TestApp, tok: &str) {
     transfer::run(t, tok).await;
     sharing::run(t, tok).await;
+    trial::run(t, tok).await;
 }
 
 mod sharing {
@@ -516,10 +517,261 @@ mod sharing {
     }
 }
 
+mod trial {
+    use super::transfer::{upload, wait_job};
+    use super::*;
+
+    fn names(list: &Value) -> Vec<String> {
+        list["items"].as_array().unwrap().iter().map(|r| r["name"].as_str().unwrap().to_string()).collect()
+    }
+
+    async fn get(t: &TestApp, tok: &str, path: &str) -> Value {
+        let (s, v) = t.req("GET", path, Some(tok), None).await;
+        assert_eq!(s, StatusCode::OK, "{path}: {v}");
+        v
+    }
+
+    pub async fn run(t: &TestApp, tok: &str) {
+        // new recipes go to the cookbook unless asked otherwise
+        let (s, dal) = t.req("POST", "/api/recipes", Some(tok), Some(json!({"name": "Weeknight Dal"}))).await;
+        assert_eq!(s, StatusCode::CREATED, "{dal}");
+        assert_eq!(dal["status"], "cookbook");
+        assert_eq!(dal["tried_count"], 0);
+        assert!(dal["last_tried_at"].is_null());
+        let (s, r) = t
+            .req(
+                "POST",
+                "/api/recipes",
+                Some(tok),
+                Some(json!({"name": "Miso Glazed Aubergine", "status": "trial", "notes": "From the market stall."})),
+            )
+            .await;
+        assert_eq!(s, StatusCode::CREATED, "{r}");
+        assert_eq!(r["status"], "trial");
+        let id = r["id"].as_str().unwrap().to_string();
+        let path = format!("/api/recipes/{id}");
+        let (s, _) = t.req("POST", "/api/recipes", Some(tok), Some(json!({"name": "X", "status": "someday"}))).await;
+        assert!(s.is_client_error(), "{s}");
+
+        // the plain list is the cookbook; the trial list and searches include trial recipes
+        let list = get(t, tok, "/api/recipes?per_page=500").await;
+        assert!(names(&list).contains(&"Weeknight Dal".to_string()));
+        assert!(!names(&list).contains(&"Miso Glazed Aubergine".to_string()));
+        assert!(list["items"].as_array().unwrap().iter().all(|r| r["status"] == "cookbook"));
+        let trials = get(t, tok, "/api/recipes?status=trial&per_page=500").await;
+        assert!(names(&trials).contains(&"Miso Glazed Aubergine".to_string()));
+        assert!(trials["items"].as_array().unwrap().iter().all(|r| r["status"] == "trial"), "{trials}");
+        let found = get(t, tok, "/api/recipes?q=aubergine").await;
+        assert_eq!(found["total"], 1);
+        assert_eq!(found["items"][0]["status"], "trial");
+        assert_eq!(found["items"][0]["tried_count"], 0);
+        assert!(found["items"][0]["created_at"].is_string());
+        let all = get(t, tok, "/api/recipes?status=all&per_page=500").await;
+        assert_eq!(all["total"].as_i64().unwrap(), list["total"].as_i64().unwrap() + trials["total"].as_i64().unwrap());
+        let (s, _) = t.req("GET", "/api/recipes?status=someday", Some(tok), None).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+
+        // viewing a trial recipe never counts as making it
+        for _ in 0..2 {
+            let seen = get(t, tok, &path).await;
+            assert_eq!((seen["tried_count"].as_i64(), seen["version"].as_i64()), (Some(0), r["version"].as_i64()));
+        }
+
+        // edits keep the status (and never touch the counters) unless they change it
+        let mut edited = r.clone();
+        edited.as_object_mut().unwrap().remove("status");
+        edited["tried_count"] = json!(5);
+        edited["description"] = json!("Sticky and sweet.");
+        let (s, edited) = t.req("PUT", &path, Some(tok), Some(edited)).await;
+        assert_eq!(s, StatusCode::OK, "{edited}");
+        assert_eq!(edited["status"], "trial");
+        assert_eq!(edited["tried_count"], 0);
+
+        // "Try again": counted, rated, and the note is appended as a dated line
+        let tried = format!("{path}/tried");
+        let verdict = json!({"outcome": "again", "tried_at": "2026-11-12T18:30:00Z", "date": "2026-11-12", "rating": 4,
+            "note": "too salty, cut soy by half"});
+        let (s, v) = t.req("POST", &tried, Some(tok), Some(verdict.clone())).await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+        assert_eq!(v["status"], "trial");
+        assert_eq!(v["tried_count"], 1);
+        assert_eq!(v["last_tried_at"], "2026-11-12T18:30:00.000000Z");
+        assert_eq!(v["rating"], 4);
+        assert_eq!(v["notes"], "From the market stall.\nNov 12, 2026: too salty, cut soy by half");
+        assert_eq!(v["version"].as_i64(), edited["version"].as_i64().map(|n| n + 1));
+        // replaying the same verdict (an offline retry after a lost response) changes nothing
+        let (s, again) = t.req("POST", &tried, Some(tok), Some(verdict)).await;
+        assert_eq!(s, StatusCode::OK);
+        assert_eq!(
+            (again["tried_count"].clone(), again["notes"].clone(), again["version"].clone()),
+            (json!(1), v["notes"].clone(), v["version"].clone())
+        );
+        // verdicts from two devices at once both count
+        let a = json!({"outcome": "again", "tried_at": "2026-11-13T18:00:00Z"});
+        let b = json!({"outcome": "again", "tried_at": "2026-11-13T19:00:00Z"});
+        let ((sa, _), (sb, _)) = tokio::join!(t.req("POST", &tried, Some(tok), Some(a)), t.req("POST", &tried, Some(tok), Some(b)));
+        assert_eq!((sa, sb), (StatusCode::OK, StatusCode::OK));
+        // a verdict that arrives late does not move last_tried_at back
+        let (_, v) = t.req("POST", &tried, Some(tok), Some(json!({"outcome": "again", "tried_at": "2026-11-01T12:00:00+01:00"}))).await;
+        assert_eq!(v["tried_count"], 4);
+        assert_eq!(v["last_tried_at"], "2026-11-13T19:00:00.000000Z");
+        assert_eq!(v["rating"], 4, "no rating keeps the old one");
+        assert_eq!(v["notes"], "From the market stall.\nNov 12, 2026: too salty, cut soy by half", "no note adds no line");
+        for bad in [
+            json!({"outcome": "maybe"}),
+            json!({"outcome": "again", "rating": 9}),
+            json!({"outcome": "again", "tried_at": "yesterday"}),
+            json!({"outcome": "again", "date": "12/11/2026"}),
+        ] {
+            let (s, e) = t.req("POST", &tried, Some(tok), Some(bad.clone())).await;
+            assert_eq!(s, StatusCode::BAD_REQUEST, "{bad}: {e}");
+        }
+        let (s, _) =
+            t.req("POST", "/api/recipes/00000000-0000-4000-8000-000000000000/tried", Some(tok), Some(json!({"outcome": "keep"}))).await;
+        assert_eq!(s, StatusCode::NOT_FOUND);
+
+        // sync carries the status and counters
+        let sync = get(t, tok, "/api/sync").await;
+        let synced = sync["recipes"].as_array().unwrap().iter().find(|x| x["id"] == id.as_str()).unwrap();
+        assert_eq!((synced["status"].clone(), synced["tried_count"].clone()), (json!("trial"), json!(4)));
+
+        // past meal plan entries remember how "Did you make it?" was answered
+        let day = (chrono::Utc::now().date_naive() - chrono::Duration::days(2)).format("%Y-%m-%d").to_string();
+        let (s, e) = t.req("POST", "/api/mealplan", Some(tok), Some(json!({"date": day, "meal": "dinner", "recipe_id": id}))).await;
+        assert_eq!(s, StatusCode::CREATED, "{e}");
+        assert_eq!(e["recipe_status"], "trial");
+        assert!(e["trial_outcome"].is_null() && e["trial_resolved_at"].is_null());
+        let entry = format!("/api/mealplan/{}", e["id"].as_str().unwrap());
+        let body = |extra: Value| {
+            let mut b = json!({"date": day, "meal": "dinner", "recipe_id": id});
+            b.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            b
+        };
+        let (s, e) = t.req("PUT", &entry, Some(tok), Some(body(json!({"trial_outcome": "skipped"})))).await;
+        assert_eq!(s, StatusCode::OK, "{e}");
+        assert_eq!(e["trial_outcome"], "skipped");
+        let resolved_at = e["trial_resolved_at"].as_str().unwrap().to_string();
+        let (_, e) = t.req("PUT", &entry, Some(tok), Some(body(json!({"note": "with rice"})))).await;
+        assert_eq!(
+            (e["trial_outcome"].clone(), e["trial_resolved_at"].clone(), e["note"].clone()),
+            (json!("skipped"), json!(resolved_at), json!("with rice"))
+        );
+        let (s, _) = t.req("PUT", &entry, Some(tok), Some(body(json!({"trial_outcome": "nope"})))).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+        let sync = get(t, tok, "/api/sync").await;
+        let synced = sync["meal_plan"].as_array().unwrap().iter().find(|x| x["id"] == e["id"]).unwrap();
+        assert_eq!(synced["trial_outcome"], "skipped");
+        let (_, e) = t.req("PUT", &entry, Some(tok), Some(body(json!({"trial_outcome": ""})))).await;
+        assert!(e["trial_outcome"].is_null() && e["trial_resolved_at"].is_null(), "{e}");
+
+        // shopping lists and public links work for trial recipes
+        let (_, list) = t.req("POST", "/api/shopping-lists", Some(tok), Some(json!({"name": "Trial run"}))).await;
+        let (s, _) = t
+            .req(
+                "POST",
+                &format!("/api/shopping-lists/{}/add-recipes", list["id"].as_str().unwrap()),
+                Some(tok),
+                Some(json!({"recipes": [{"recipe_id": id}]})),
+            )
+            .await;
+        assert_eq!(s, StatusCode::OK);
+        let (s, sh) = t.req("POST", &format!("{path}/share"), Some(tok), None).await;
+        assert_eq!(s, StatusCode::CREATED);
+        let (s, _, html) = t.page(&format!("/s/{}", sh["token"].as_str().unwrap())).await;
+        assert_eq!(s, StatusCode::OK);
+        assert!(html.contains("Miso Glazed Aubergine"));
+
+        // a copy stays on trial with a history of its own
+        let (s, copy) = t.req("POST", &format!("{path}/duplicate"), Some(tok), None).await;
+        assert_eq!(s, StatusCode::CREATED);
+        assert_eq!((copy["status"].clone(), copy["tried_count"].clone()), (json!("trial"), json!(0)));
+        t.req("DELETE", &format!("/api/recipes/{}", copy["id"].as_str().unwrap()), Some(tok), None).await;
+
+        // the printed cookbook leaves trial recipes out, even when picked
+        let book = |ids: Value| {
+            Request::builder()
+                .method("POST")
+                .uri("/api/export/cookbook")
+                .header("authorization", format!("Bearer {tok}"))
+                .header("content-type", "application/json")
+                .body(Body::from(json!({"title": "Tried & True", "recipe_ids": ids, "include_images": false}).to_string()))
+                .unwrap()
+        };
+        let (s, _) = t.raw(book(json!([id]))).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+        let (s, pdf) = t.raw(book(json!([id, dal["id"]]))).await;
+        assert_eq!(s, StatusCode::OK);
+        assert_eq!(&pdf[..4], b"%PDF");
+
+        // backups keep the status and counters
+        let req = Request::builder().uri("/api/export/json").header("authorization", format!("Bearer {tok}")).body(Body::empty()).unwrap();
+        let (_, zip) = t.raw(req).await;
+        let (s, job) = upload(t, tok, "/api/import/file", "backup.zip", &zip, &[("source", "larder"), ("skip_duplicates", "false")]).await;
+        assert_eq!(s, StatusCode::ACCEPTED);
+        assert_eq!(wait_job(t, tok, job["id"].as_str().unwrap()).await["status"], "done");
+        let copies = get(t, tok, "/api/recipes?q=miso%20glazed&status=trial").await;
+        assert_eq!(copies["total"], 2, "{copies}");
+        for c in copies["items"].as_array().unwrap() {
+            assert_eq!((c["tried_count"].clone(), c["last_tried_at"].clone()), (json!(4), json!("2026-11-13T19:00:00.000000Z")));
+        }
+
+        // single-recipe imports land on the trial list unless the import screen says otherwise
+        let text = "Lemon Rice\n\nIngredients\n1 cup rice\n1 lemon\n\nInstructions\n1. Cook the rice.\n2. Stir in the lemon.";
+        let (_, prev) = t.req("POST", "/api/import/text", Some(tok), Some(json!({"text": text}))).await;
+        assert_eq!(prev["status"], "trial");
+        let (_, saved) = t.req("POST", "/api/import/text", Some(tok), Some(json!({"text": text, "save": true}))).await;
+        assert_eq!(saved["status"], "trial");
+        let (_, saved) =
+            t.req("POST", "/api/import/text", Some(tok), Some(json!({"text": text, "save": true, "status": "cookbook"}))).await;
+        assert_eq!(saved["status"], "cookbook");
+
+        // bulk imports go to the cookbook unless asked
+        for (name, extra, status) in [("Bulk Bean Chili", vec![], "cookbook"), ("Bulk Lentil Soup", vec![("status", "trial")], "trial")] {
+            let jsonld = json!({"@context": "https://schema.org", "@type": "Recipe", "name": name, "recipeIngredient": ["1 can beans"]});
+            let mut fields = vec![("source", "jsonld")];
+            fields.extend(extra);
+            let (s, job) = upload(t, tok, "/api/import/file", "recipe.json", jsonld.to_string().as_bytes(), &fields).await;
+            assert_eq!(s, StatusCode::ACCEPTED, "{job}");
+            let job = wait_job(t, tok, job["id"].as_str().unwrap()).await;
+            let (_, imported) = t.req("GET", &format!("/api/recipes/{}", job["recipe_ids"][0].as_str().unwrap()), Some(tok), None).await;
+            assert_eq!(imported["status"], status, "{name}");
+        }
+        let (s, _) = upload(t, tok, "/api/import/file", "recipe.json", b"{}", &[("status", "someday")]).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+
+        // "Keep it" moves the recipe into the cookbook
+        let (_, kept) = t
+            .req(
+                "POST",
+                &tried,
+                Some(tok),
+                Some(json!({"outcome": "keep", "tried_at": "2026-11-20T18:00:00Z", "date": "2026-11-20", "note": "a keeper"})),
+            )
+            .await;
+        assert_eq!(kept["status"], "cookbook");
+        assert_eq!(kept["tried_count"], 5);
+        assert!(kept["notes"].as_str().unwrap().ends_with("\nNov 20, 2026: a keeper"), "{kept}");
+        let list = get(t, tok, "/api/recipes?per_page=500").await;
+        assert!(names(&list).contains(&"Miso Glazed Aubergine".to_string()));
+        // and a plain update can move it back
+        let mut back = kept.clone();
+        back["status"] = json!("trial");
+        let (_, back) = t.req("PUT", &path, Some(tok), Some(back)).await;
+        assert_eq!((back["status"].clone(), back["tried_count"].clone()), (json!("trial"), json!(5)));
+    }
+}
+
 mod transfer {
     use super::*;
 
-    async fn upload(t: &TestApp, tok: &str, path: &str, filename: &str, bytes: &[u8], extra: &[(&str, &str)]) -> (StatusCode, Value) {
+    pub(super) async fn upload(
+        t: &TestApp,
+        tok: &str,
+        path: &str,
+        filename: &str,
+        bytes: &[u8],
+        extra: &[(&str, &str)],
+    ) -> (StatusCode, Value) {
         let (ct, body) = multipart("file", filename, bytes, extra);
         let req = Request::builder()
             .method("POST")
@@ -532,7 +784,7 @@ mod transfer {
         (s, serde_json::from_slice(&b).unwrap_or(Value::Null))
     }
 
-    async fn wait_job(t: &TestApp, tok: &str, id: &str) -> Value {
+    pub(super) async fn wait_job(t: &TestApp, tok: &str, id: &str) -> Value {
         for _ in 0..200 {
             let (_, job) = t.req("GET", &format!("/api/import/jobs/{id}"), Some(tok), None).await;
             if job["status"] == "done" || job["status"] == "failed" {
@@ -590,7 +842,7 @@ mod transfer {
         let (s, zip) = t.raw(req).await;
         assert_eq!(s, StatusCode::OK);
         assert_eq!(&zip[..2], b"PK");
-        let (_, before) = t.req("GET", "/api/recipes", Some(tok), None).await;
+        let (_, before) = t.req("GET", "/api/recipes?status=all", Some(tok), None).await;
         let (s, job) = upload(t, tok, "/api/import/file", "backup.zip", &zip, &[("source", "larder")]).await;
         assert_eq!(s, StatusCode::ACCEPTED);
         let job = wait_job(t, tok, job["id"].as_str().unwrap()).await;

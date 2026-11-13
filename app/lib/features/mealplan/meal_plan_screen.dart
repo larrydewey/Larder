@@ -8,10 +8,15 @@ import 'package:material_ui/material_ui.dart';
 import '../../data/providers.dart';
 import '../../data/backend.dart';
 import '../../models/meal_plan.dart';
+import '../../models/recipe.dart';
+import '../../models/trial.dart';
 import '../../util/fractions.dart';
 import '../../widgets/recipe_image.dart';
 import '../../widgets/snack.dart';
+import '../../widgets/trial_badge.dart';
 import '../recipes/recipe_actions.dart';
+import '../trial/trial_actions.dart';
+import '../trial/verdict_sheet.dart';
 import 'meal_entry_sheet.dart';
 
 DateTime _monday(DateTime d) {
@@ -251,6 +256,9 @@ class _EntryTile extends ConsumerWidget {
       if (entry.servings != null) '${formatFraction(entry.servings!)} servings',
       if (entry.note != null && entry.note!.isNotEmpty) entry.note!,
     ].join(' · ');
+    final isTrial = recipe?.isTrial ?? entry.recipeStatus == RecipeStatus.trial;
+    // Non-modal: ignoring the chip changes nothing; answering it once resolves the entry.
+    final ask = asksDidYouMakeIt(entry, recipe);
     return ListTile(
       contentPadding: const EdgeInsets.only(left: 0, right: 0),
       leading: ClipRRect(
@@ -266,8 +274,34 @@ class _EntryTile extends ConsumerWidget {
               : RecipeImage(url: image, localPath: recipe?.localImage('thumb'), iconSize: 20),
         ),
       ),
-      title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
-      subtitle: Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis),
+      title: Row(
+        children: [
+          Flexible(child: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis)),
+          if (isTrial) ...[const SizedBox(width: 6), const TrialBadge(dense: true)],
+        ],
+      ),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis),
+          if (ask)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: ActionChip(
+                key: Key('did-you-make-it-${entry.id}'),
+                visualDensity: VisualDensity.compact,
+                avatar: const Icon(Icons.help_outline_rounded, size: 18),
+                label: const Text('Did you make it?'),
+                onPressed: () async {
+                  final result = await showVerdictSheet(context, recipe!, mode: VerdictMode.mealPlan);
+                  if (result != null && context.mounted) {
+                    await applyVerdictResult(context, ref, recipe, result, entry: entry);
+                  }
+                },
+              ),
+            ),
+        ],
+      ),
       onTap: entry.recipeId != null
           ? () => context.go('/recipes/${entry.recipeId}')
           : () => showMealEntrySheet(context, ref, entry: entry),

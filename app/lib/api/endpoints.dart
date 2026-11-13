@@ -181,8 +181,8 @@ extension LarderApi on ApiClient {
 
   // ---- import -------------------------------------------------------------
   /// Returns the raw recipe JSON (RecipeInput preview, or saved Recipe).
-  Future<Json> importUrl(String url, {required bool save}) async =>
-      asJson(await post('/api/import/url', {'url': url, 'save': save}));
+  Future<Json> importUrl(String url, {required bool save, String? status}) async =>
+      asJson(await post('/api/import/url', {'url': url, 'save': save, 'status': ?status}));
   Future<Json> importText(String text, {required bool save, bool useLlm = false}) async =>
       asJson(await post('/api/import/text', {'text': text, 'save': save, 'use_llm': useLlm}));
   Future<Json> importImage(Uint8List bytes, String filename, {required bool save}) async => asJson(
@@ -199,12 +199,18 @@ extension LarderApi on ApiClient {
     required String source,
     bool skipDuplicates = true,
     bool categorize = true,
+    String? status,
   }) async => ImportJob.fromJson(
     asJson(
       await multipart(
         'POST',
         '/api/import/file',
-        fields: {'source': source, 'skip_duplicates': skipDuplicates.toString(), 'categorize': categorize.toString()},
+        fields: {
+          'source': source,
+          'skip_duplicates': skipDuplicates.toString(),
+          'categorize': categorize.toString(),
+          'status': ?status,
+        },
         files: [UploadFile(field: 'file', bytes: bytes, filename: filename)],
       ),
     ),
@@ -214,6 +220,7 @@ extension LarderApi on ApiClient {
     String token, {
     bool skipDuplicates = true,
     bool categorize = true,
+    String? status,
   }) async => ImportJob.fromJson(
     asJson(
       await post('/api/import/mealie', {
@@ -221,6 +228,7 @@ extension LarderApi on ApiClient {
         'token': token,
         'skip_duplicates': skipDuplicates,
         'categorize': categorize,
+        'status': ?status,
       }),
     ),
   );

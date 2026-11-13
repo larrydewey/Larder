@@ -42,15 +42,16 @@ void     larder_free(uint8_t* ptr, size_t len);
 | `llm_recipe_from_image` | `{ "llm": LlmConfig, "image_path": "..." }` | `RecipeInput` |
 | `llm_parse_ingredients` | `{ "llm": LlmConfig, "lines": [...] }` | `[Ingredient]` |
 | `cookbook_themes` | `{}` | `[{ "id", "name", "description" }]` |
-| `render_cookbook` | `{ "options": CookbookOptions (API.md, without recipe_ids), "recipes": [{ "id", "data": RecipeInput, "image_path": "..." \| null }], "out_path": ".../book.pdf" }` | `{ "path": out_path, "bytes": 123456 }` |
-| `export_backup` | `{ "recipes": [{ "id", "data": RecipeInput, "image_path", "favorite", "created_at", "updated_at" }], "out_path": ".../larder-backup.zip" }` | `{ "path": out_path }` — same zip format as the server's `GET /api/export/json`, importable with source `larder` on either side |
+| `render_cookbook` | `{ "options": CookbookOptions (API.md, without recipe_ids), "recipes": [{ "id", "data": RecipeInput, "image_path": "..." \| null, "status": "cookbook" \| "trial" }], "out_path": ".../book.pdf" }` (recipes with `status: "trial"` are skipped) | `{ "path": out_path, "bytes": 123456 }` |
+| `export_backup` | `{ "recipes": [{ "id", "data": RecipeInput, "image_path", "favorite", "status", "tried_count", "last_tried_at", "created_at", "updated_at" }], "out_path": ".../larder-backup.zip" }` | `{ "path": out_path }` — same zip format as the server's `GET /api/export/json`, importable with source `larder` on either side |
 
 ```json
 ImportedRecipe = {
   "data": RecipeInput,
   "image_path": "/…/image_dir/<uuid>.jpg" | null,   // downloaded/extracted image, already a JPEG
   "favorite": false,
-  "created_at": "..." | null
+  "created_at": "..." | null,
+  "trial": { "status": "trial", "tried_count": 2, "last_tried_at": "..." } | null  // only Larder archives record it
 }
 LlmConfig = { "provider": "anthropic" | "openai" | "ollama", "api_key": "..." | null, "model": "..." | null, "base_url": "..." | null }
 ```
