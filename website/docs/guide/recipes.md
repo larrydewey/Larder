@@ -51,9 +51,10 @@ on a touch screen.
 
 ### How to add a recipe
 
-Tap **New recipe** (bottom right) to open the [editor](editing.md), or use
-[Import](importing.md). An empty collection shows **Your cookbook is empty** with **New
-recipe** and **Import** buttons.
+Tap **Add recipe** (bottom right) and pick **Write it myself** to open the
+[editor](editing.md), or one of the [import](importing.md) choices: **From a website**, **From
+text**, **From a photo** or **Import a collection**. An empty collection shows **Your cookbook is
+empty** with the same **Add recipe** button.
 
 ## The recipe page
 

@@ -48,6 +48,8 @@ final routerProvider = Provider<GoRouter>((ref) {
         appRedirect(ref.read(appModeProvider), ref.read(authProvider).status, state.matchedLocation),
     routes: [
       GoRoute(path: '/', redirect: (_, _) => '/recipes'),
+      // Old links to the Import tab, which is now part of Add.
+      GoRoute(path: '/import', redirect: (_, _) => '/recipes/import'),
       GoRoute(path: '/welcome', builder: (_, _) => const WelcomeScreen()),
       GoRoute(path: '/setup-server', builder: (_, _) => const ServerSetupScreen()),
       // Connect-later flow (standalone -> connected).
@@ -92,9 +94,6 @@ final routerProvider = Provider<GoRouter>((ref) {
             ],
           ),
           StatefulShellBranch(
-            routes: [GoRoute(path: '/import', builder: (_, _) => const ImportScreen())],
-          ),
-          StatefulShellBranch(
             routes: [
               GoRoute(
                 path: '/settings',
@@ -118,11 +117,10 @@ final routerProvider = Provider<GoRouter>((ref) {
 /// Import / new / detail / cook / edit routes below a list ([base] is `/recipes` or
 /// `/trial`), so a recipe opened from the trial list stays in that tab.
 List<RouteBase> _recipeRoutes(String base) => [
-  // Phones have no Import tab: Recipes and Trial open it here, and it
-  // defaults to the list it was opened from.
+  // Importing is part of Add on Recipes and Trial (see add_sheet.dart).
   GoRoute(
     path: 'import',
-    builder: (_, _) => ImportScreen(toTrial: base == '/trial'),
+    builder: (_, state) => ImportScreen(initialTab: state.uri.queryParameters['tab'], trial: base == '/trial'),
   ),
   GoRoute(
     path: 'new',

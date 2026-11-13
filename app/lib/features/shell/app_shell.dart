@@ -23,22 +23,11 @@ const _destinations = [
   _Dest('Trial', Icons.science_outlined, Icons.science_rounded),
   _Dest('Meal Plan', Icons.calendar_month_outlined, Icons.calendar_month_rounded),
   _Dest('Shopping', Icons.shopping_basket_outlined, Icons.shopping_basket_rounded),
-  _Dest('Import', Icons.download_outlined, Icons.download_rounded),
   _Dest('Settings', Icons.settings_outlined, Icons.settings_rounded),
 ];
 
 /// Index of the Trial destination (its count is shown as a badge).
 const _trialIndex = 1;
-
-/// Index of the Import destination. Phones leave it off the bar; the Recipes
-/// and Trial screens open Import instead.
-const _importIndex = 4;
-
-/// Branch indexes shown on the phone bar, in order.
-final _phoneBranches = [
-  for (var i = 0; i < _destinations.length; i++)
-    if (i != _importIndex) i,
-];
 
 /// Adaptive scaffold: NavigationBar on phones, NavigationRail on wide screens.
 /// Also owns app-wide sync triggers (start, resume, notices).
@@ -94,17 +83,15 @@ class _AppShellState extends ConsumerState<AppShell> {
       return Scaffold(
         body: body,
         bottomNavigationBar: NavigationBar(
-          // The Import tab (reachable after shrinking a wide window) shows
-          // as Recipes, where its button lives.
-          selectedIndex: _phoneBranches.indexOf(widget.shell.currentIndex).clamp(0, _phoneBranches.length - 1),
-          onDestinationSelected: (i) => _go(_phoneBranches[i]),
+          selectedIndex: widget.shell.currentIndex,
+          onDestinationSelected: _go,
           labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
           destinations: [
-            for (final i in _phoneBranches)
+            for (final (i, d) in _destinations.indexed)
               NavigationDestination(
-                icon: _icon(i, _destinations[i].icon, trials),
-                selectedIcon: _icon(i, _destinations[i].selectedIcon, trials),
-                label: _destinations[i].label,
+                icon: _icon(i, d.icon, trials),
+                selectedIcon: _icon(i, d.selectedIcon, trials),
+                label: d.label,
               ),
           ],
         ),

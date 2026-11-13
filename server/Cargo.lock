@@ -1989,7 +1989,7 @@ dependencies = [
 
 [[package]]
 name = "larder-assist"
-version = "0.1.5"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -2001,7 +2001,7 @@ dependencies = [
 
 [[package]]
 name = "larder-cookbook"
-version = "0.1.5"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2019,7 +2019,7 @@ dependencies = [
 
 [[package]]
 name = "larder-core"
-version = "0.1.5"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "regex",
@@ -2029,7 +2029,7 @@ dependencies = [
 
 [[package]]
 name = "larder-engine"
-version = "0.1.5"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "image",
@@ -2047,7 +2047,7 @@ dependencies = [
 
 [[package]]
 name = "larder-import"
-version = "0.1.5"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -2067,7 +2067,7 @@ dependencies = [
 
 [[package]]
 name = "larder-server"
-version = "0.1.5"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "argon2",
