@@ -86,13 +86,13 @@ pub fn normalize_timestamp(s: &str) -> Option<String> {
 }
 
 /// The dated line a verdict note adds to the recipe notes, e.g.
-/// `Nov 12: too salty, cut soy by half`. `None` for an empty note.
+/// `Nov 12, 2026: too salty, cut soy by half`. `None` for an empty note.
 pub fn note_line(date: chrono::NaiveDate, note: &str) -> Option<String> {
     let note = crate::text::collapse_ws(note);
     if note.is_empty() {
         return None;
     }
-    Some(format!("{}: {note}", date.format("%b %-d")))
+    Some(format!("{}: {note}", date.format("%b %-d, %Y")))
 }
 
 /// Appends `line` to `notes` on a line of its own.
@@ -147,9 +147,9 @@ mod tests {
     #[test]
     fn note_lines_are_dated_and_appended() {
         let d = chrono::NaiveDate::from_ymd_opt(2026, 11, 2).unwrap();
-        assert_eq!(note_line(d, "  too salty,\n cut soy by half "), Some("Nov 2: too salty, cut soy by half".into()));
+        assert_eq!(note_line(d, "  too salty,\n cut soy by half "), Some("Nov 2, 2026: too salty, cut soy by half".into()));
         assert_eq!(note_line(d, "   "), None);
-        assert_eq!(append_note("", "Nov 2: good"), "Nov 2: good");
-        assert_eq!(append_note("Use fresh basil.\n\n", "Nov 2: good"), "Use fresh basil.\nNov 2: good");
+        assert_eq!(append_note("", "Nov 2, 2026: good"), "Nov 2, 2026: good");
+        assert_eq!(append_note("Use fresh basil.\n\n", "Nov 2, 2026: good"), "Use fresh basil.\nNov 2, 2026: good");
     }
 }

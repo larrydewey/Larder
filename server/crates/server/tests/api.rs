@@ -597,7 +597,7 @@ mod trial {
         assert_eq!(v["tried_count"], 1);
         assert_eq!(v["last_tried_at"], "2026-11-12T18:30:00.000000Z");
         assert_eq!(v["rating"], 4);
-        assert_eq!(v["notes"], "From the market stall.\nNov 12: too salty, cut soy by half");
+        assert_eq!(v["notes"], "From the market stall.\nNov 12, 2026: too salty, cut soy by half");
         assert_eq!(v["version"].as_i64(), edited["version"].as_i64().map(|n| n + 1));
         // replaying the same verdict (an offline retry after a lost response) changes nothing
         let (s, again) = t.req("POST", &tried, Some(tok), Some(verdict)).await;
@@ -616,7 +616,7 @@ mod trial {
         assert_eq!(v["tried_count"], 4);
         assert_eq!(v["last_tried_at"], "2026-11-13T19:00:00.000000Z");
         assert_eq!(v["rating"], 4, "no rating keeps the old one");
-        assert_eq!(v["notes"], "From the market stall.\nNov 12: too salty, cut soy by half", "no note adds no line");
+        assert_eq!(v["notes"], "From the market stall.\nNov 12, 2026: too salty, cut soy by half", "no note adds no line");
         for bad in [
             json!({"outcome": "maybe"}),
             json!({"outcome": "again", "rating": 9}),
@@ -750,7 +750,7 @@ mod trial {
             .await;
         assert_eq!(kept["status"], "cookbook");
         assert_eq!(kept["tried_count"], 5);
-        assert!(kept["notes"].as_str().unwrap().ends_with("\nNov 20: a keeper"), "{kept}");
+        assert!(kept["notes"].as_str().unwrap().ends_with("\nNov 20, 2026: a keeper"), "{kept}");
         let list = get(t, tok, "/api/recipes?per_page=500").await;
         assert!(names(&list).contains(&"Miso Glazed Aubergine".to_string()));
         // and a plain update can move it back

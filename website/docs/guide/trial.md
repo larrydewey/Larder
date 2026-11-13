@@ -44,5 +44,5 @@ The answers:
 | **Just looking** / **Cancel** | Nothing |
 
 You can add a star rating and a short note. The note is added to the recipe's notes as a dated
-line, such as `Nov 12: too salty, cut soy by half`. Counts are kept per household and work
+line, such as `Nov 12, 2026: too salty, cut soy by half`. Counts are kept per household and work
 offline: answers given on two phones at once both count.

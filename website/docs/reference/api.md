@@ -297,7 +297,7 @@ recipe never changes it; only these explicit actions do:
   "tried_at": "2026-11-12T18:30:00Z", // optional, default now; also identifies the verdict
   "date": "2026-11-12",               // optional: the cook's local date for the note line
   "rating": 4,                        // optional 1-5; omitted or null keeps the rating
-  "note": "too salty, cut soy by half" // optional; appended to notes as "Nov 12: too salty, …"
+  "note": "too salty, cut soy by half" // optional; appended to notes as "Nov 12, 2026: too salty, …"
 }
 ```
   → `Recipe`. Adds 1 to `tried_count`, moves `last_tried_at` forward (never back) and increments

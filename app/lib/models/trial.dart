@@ -47,12 +47,12 @@ class TrialVerdict {
 const _months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 /// The dated line a verdict note adds to the recipe notes
-/// (`Nov 12: too salty, cut soy by half`), or null for an empty note.
+/// (`Nov 12, 2026: too salty, cut soy by half`), or null for an empty note.
 /// Same format as the server's `note_line`.
 String? trialNoteLine(DateTime date, String note) {
   final text = note.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).join(' ');
   if (text.isEmpty) return null;
-  return '${_months[date.month - 1]} ${date.day}: $text';
+  return '${_months[date.month - 1]} ${date.day}, ${date.year}: $text';
 }
 
 /// Appends [line] to [notes] on a line of its own.

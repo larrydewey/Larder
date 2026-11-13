@@ -94,7 +94,7 @@ void main() {
       );
       expect(o.kind, OutcomeKind.applied);
       var saved = (await store.recipe('r1'))!;
-      expect((saved.triedCount, saved.rating, saved.notes, saved.version), (1, 4, 'Nov 12: too salty', 2));
+      expect((saved.triedCount, saved.rating, saved.notes, saved.version), (1, 4, 'Nov 12, 2026: too salty', 2));
       expect(saved.lastTriedAt, DateTime.utc(2026, 11, 12, 19));
 
       // An edit made from a copy without the counters does not reset them.

@@ -44,7 +44,7 @@ void main() {
     expect(o.kind, OutcomeKind.queued);
     final local = (await store.recipe('r1'))!;
     expect((local.triedCount, local.rating, local.status, local.version), (1, 4, RecipeStatus.trial, 3));
-    expect(local.notes, 'Nov 12: too salty');
+    expect(local.notes, 'Nov 12, 2026: too salty');
     final op = (await store.ops()).single;
     expect((op.method, op.path), ('POST', '/api/recipes/r1/tried'));
     expect(op.body, verdict.toJson());

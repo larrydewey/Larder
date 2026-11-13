@@ -16,11 +16,11 @@ void main() {
   test('note lines match the server format', () {
     expect(
       trialNoteLine(DateTime(2026, 11, 2), '  too salty,\n cut soy by half '),
-      'Nov 2: too salty, cut soy by half',
+      'Nov 2, 2026: too salty, cut soy by half',
     );
     expect(trialNoteLine(DateTime(2026, 1, 12), '   '), isNull);
-    expect(appendNoteLine('', 'Nov 2: good'), 'Nov 2: good');
-    expect(appendNoteLine('Use fresh basil.\n\n', 'Nov 2: good'), 'Use fresh basil.\nNov 2: good');
+    expect(appendNoteLine('', 'Nov 2, 2026: good'), 'Nov 2, 2026: good');
+    expect(appendNoteLine('Use fresh basil.\n\n', 'Nov 2, 2026: good'), 'Use fresh basil.\nNov 2, 2026: good');
   });
 
   test('a verdict body carries the outcome, an idempotency time and the local date', () {
@@ -56,7 +56,7 @@ void main() {
     expect(again.triedCount, 1);
     expect(again.lastTriedAt, DateTime.utc(2026, 11, 12));
     expect(again.rating, 5);
-    expect(again.notes, 'From the market.\nNov 12: great');
+    expect(again.notes, 'From the market.\nNov 12, 2026: great');
 
     // An older verdict arriving late does not move last_tried_at back; no rating/note keeps them.
     final late = applyTrialVerdict(again, TrialVerdict(keep: true, triedAt: DateTime.utc(2026, 11, 1)));
