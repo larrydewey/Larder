@@ -7,7 +7,8 @@ the **Trial** tab shows how many are waiting (for example "Trial · 7").
 ## What lands on the trial list
 
 - Recipes imported from a **website**, **text** or a **photo**. The import screen has an
-  **Add to Trial** switch if you would rather put one straight in the cookbook.
+  **Add to Trial** switch if you would rather put one straight in the cookbook. Opened from
+  **Recipes** the switch starts off; opened from **Trial** it starts on.
 - Recipes you create from the Trial screen (**Recipe to try**). In the editor, **Save to**
   switches any recipe between **Cookbook** and **Trial**.
 - Bulk imports (Paprika, Mealie, Tandoor, Nextcloud Cookbook, Recipe Keeper) go to the cookbook

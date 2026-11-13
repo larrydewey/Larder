@@ -34,7 +34,7 @@ class TrialScreen extends ConsumerWidget {
           IconButton(
             tooltip: 'Import a recipe',
             icon: const Icon(Icons.download_outlined),
-            onPressed: () => context.go('/import'),
+            onPressed: () => context.go('/trial/import'),
           ),
         ],
       ),

@@ -30,6 +30,16 @@ const _destinations = [
 /// Index of the Trial destination (its count is shown as a badge).
 const _trialIndex = 1;
 
+/// Index of the Import destination. Phones leave it off the bar; the Recipes
+/// and Trial screens open Import instead.
+const _importIndex = 4;
+
+/// Branch indexes shown on the phone bar, in order.
+final _phoneBranches = [
+  for (var i = 0; i < _destinations.length; i++)
+    if (i != _importIndex) i,
+];
+
 /// Adaptive scaffold: NavigationBar on phones, NavigationRail on wide screens.
 /// Also owns app-wide sync triggers (start, resume, notices).
 class AppShell extends ConsumerStatefulWidget {
@@ -84,15 +94,17 @@ class _AppShellState extends ConsumerState<AppShell> {
       return Scaffold(
         body: body,
         bottomNavigationBar: NavigationBar(
-          selectedIndex: widget.shell.currentIndex,
-          onDestinationSelected: _go,
+          // The Import tab (reachable after shrinking a wide window) shows
+          // as Recipes, where its button lives.
+          selectedIndex: _phoneBranches.indexOf(widget.shell.currentIndex).clamp(0, _phoneBranches.length - 1),
+          onDestinationSelected: (i) => _go(_phoneBranches[i]),
           labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
           destinations: [
-            for (final (i, d) in _destinations.indexed)
+            for (final i in _phoneBranches)
               NavigationDestination(
-                icon: _icon(i, d.icon, trials),
-                selectedIcon: _icon(i, d.selectedIcon, trials),
-                label: d.label,
+                icon: _icon(i, _destinations[i].icon, trials),
+                selectedIcon: _icon(i, _destinations[i].selectedIcon, trials),
+                label: _destinations[i].label,
               ),
           ],
         ),

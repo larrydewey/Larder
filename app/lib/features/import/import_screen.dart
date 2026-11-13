@@ -76,7 +76,11 @@ class _BulkTrialSwitch extends StatelessWidget {
 }
 
 class ImportScreen extends ConsumerStatefulWidget {
-  const ImportScreen({super.key});
+  const ImportScreen({super.key, this.toTrial});
+
+  /// Starting value of "Add to Trial" for single-recipe imports, or null to
+  /// keep the last choice (the Import tab on wide screens).
+  final bool? toTrial;
 
   @override
   ConsumerState<ImportScreen> createState() => _ImportScreenState();
@@ -85,6 +89,18 @@ class ImportScreen extends ConsumerStatefulWidget {
 class _ImportScreenState extends ConsumerState<ImportScreen> {
   ImportJob? _job;
   StreamSubscription<ImportJob>? _sub;
+
+  @override
+  void initState() {
+    super.initState();
+    final toTrial = widget.toTrial;
+    if (toTrial != null) {
+      // Providers can't change while the tree builds.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) ref.read(_singleToTrialProvider.notifier).set(toTrial);
+      });
+    }
+  }
 
   @override
   void dispose() {

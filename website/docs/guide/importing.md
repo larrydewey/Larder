@@ -1,6 +1,8 @@
 # Importing recipes
 
-The **Import** screen has a tab for each way of bringing recipes in:
+The **Import** screen has a tab for each way of bringing recipes in. On a phone, open it with
+the import button at the top of **Recipes** or **Trial**; on a wider screen it also has its own
+entry in the side rail.
 
 ![The Import screen](../assets/screenshots/d-import.webp){ .screenshot }
 

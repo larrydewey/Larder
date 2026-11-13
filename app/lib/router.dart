@@ -115,9 +115,15 @@ final routerProvider = Provider<GoRouter>((ref) {
   return router;
 });
 
-/// New / detail / cook / edit routes below a list ([base] is `/recipes` or
+/// Import / new / detail / cook / edit routes below a list ([base] is `/recipes` or
 /// `/trial`), so a recipe opened from the trial list stays in that tab.
 List<RouteBase> _recipeRoutes(String base) => [
+  // Phones have no Import tab: Recipes and Trial open it here, and it
+  // defaults to the list it was opened from.
+  GoRoute(
+    path: 'import',
+    builder: (_, _) => ImportScreen(toTrial: base == '/trial'),
+  ),
   GoRoute(
     path: 'new',
     parentNavigatorKey: rootNavigatorKey,

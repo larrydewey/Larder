@@ -79,6 +79,11 @@ class _RecipeListScreenState extends ConsumerState<RecipeListScreen> {
       appBar: AppBar(
         title: const Text('Recipes'),
         actions: [
+          IconButton(
+            tooltip: 'Import recipes',
+            icon: const Icon(Icons.download_outlined),
+            onPressed: () => context.go('/recipes/import'),
+          ),
           PopupMenuButton<RecipeSort>(
             tooltip: 'Sort',
             icon: const Icon(Icons.sort_rounded),
@@ -159,7 +164,7 @@ class _RecipeListScreenState extends ConsumerState<RecipeListScreen> {
                     label: const Text('New recipe'),
                   ),
                   OutlinedButton.icon(
-                    onPressed: () => context.go('/import'),
+                    onPressed: () => context.go('/recipes/import'),
                     icon: const Icon(Icons.download),
                     label: const Text('Import'),
                   ),
